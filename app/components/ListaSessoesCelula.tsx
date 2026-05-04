@@ -1,6 +1,7 @@
 'use client'
 
 import { Sessao } from '../actions'
+import { STATUS_COR } from '@/lib/status-helpers'
 import { SidepanelContainer } from './SidepanelContainer'
 
 interface Props {
@@ -13,14 +14,7 @@ interface Props {
   onFechar: () => void
 }
 
-const STATUS_COR: Record<string, string> = {
-  AGENDADO: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-  CONFIRMADO: 'bg-blue-50 text-blue-700 border-blue-200',
-  PRESENTE: 'bg-green-50 text-green-700 border-green-200',
-  FALTA: 'bg-red-50 text-red-700 border-red-200',
-  CANCELADO: 'bg-gray-100 text-gray-400 border-gray-300 line-through',
-  REPOSTO: 'bg-purple-50 text-purple-700 border-purple-200',
-}
+
 
 export function ListaSessoesCelula({ data, horaInicio, horaFim, sessoes, onEditar, onNova, onFechar }: Props) {
   const dataBR = data.split('-').reverse().join('/')
@@ -37,13 +31,16 @@ export function ListaSessoesCelula({ data, horaInicio, horaFim, sessoes, onEdita
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-sm font-bold">{s.paciente_nome}</span>
+              <span className="text-sm font-bold">
+                {s.recorrente ? '↻ ' : ''}
+                {s.tipo !== 'SESSAO' ? (s.titulo || s.tipo) : s.paciente_nome}
+              </span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded border ${STATUS_COR[s.status] || ''}`}>
                 {s.status}
               </span>
             </div>
             <div className="text-xs text-gray-600 mt-1">
-              {(s.terapeutas || []).map(t => t.nome).join(', ')}
+              {(s.terapeutas || []).map(t => t.nome + (t.ativo === false ? '*' : '')).join(', ')}
             </div>
             {s.observacoes && (
               <div className="text-[10px] text-gray-500 mt-1 italic">{s.observacoes}</div>

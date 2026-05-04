@@ -11,7 +11,7 @@ interface Props {
 export function SidepanelContainer({ titulo, children, onFechar }: Props) {
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onFechar} aria-hidden="true" />
+      <div className="fixed inset-0 z-40 bg-black/30 cursor-pointer" onClick={onFechar} aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"

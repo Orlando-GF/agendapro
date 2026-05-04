@@ -31,6 +31,9 @@ function buildInitialForm(paciente: Patient | null | undefined): PatientFormData
       whatsapp_adicionado: paciente.whatsapp_adicionado ?? false,
       judicial: paciente.judicial ?? false,
       observacoes: paciente.observacoes ?? null,
+      status_tratamento: paciente.status_tratamento ?? 'EM_TRATAMENTO',
+      motivo_saida: paciente.motivo_saida ?? null,
+      data_saida: paciente.data_saida ?? null,
     }
   }
   return {
@@ -44,6 +47,9 @@ function buildInitialForm(paciente: Patient | null | undefined): PatientFormData
     whatsapp_adicionado: false,
     judicial: false,
     observacoes: null,
+    status_tratamento: 'EM_TRATAMENTO',
+    motivo_saida: null,
+    data_saida: null,
   }
 }
 
@@ -137,6 +143,46 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
+
+        {/* Status do Tratamento */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">STATUS DO TRATAMENTO</label>
+          <select
+            value={form.status_tratamento ?? 'EM_TRATAMENTO'}
+            onChange={e => handleChange('status_tratamento', e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            <option value="EM_TRATAMENTO">EM TRATAMENTO</option>
+            <option value="ALTA">ALTA</option>
+            <option value="DESISTIU">DESISTIU</option>
+            <option value="MUDANCA">MUDANÇA</option>
+          </select>
+        </div>
+
+        {/* Motivo da Saída + Data (só quando não é EM_TRATAMENTO) */}
+        {form.status_tratamento !== 'EM_TRATAMENTO' && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">MOTIVO DA SAÍDA</label>
+              <textarea
+                value={form.motivo_saida ?? ''}
+                onChange={e => handleChange('motivo_saida', e.target.value || null)}
+                rows={2}
+                placeholder="Ex: Mudou para São Paulo, problemas financeiros..."
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">DATA DA SAÍDA</label>
+              <input
+                type="date"
+                value={form.data_saida ?? ''}
+                onChange={e => handleChange('data_saida', e.target.value || null)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </>
+        )}
 
         {/* Status */}
         <div>

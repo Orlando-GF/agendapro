@@ -22,6 +22,7 @@ export default function RootLayout({
     <html
       lang="pt-BR"
       className={`${inter.variable} antialiased uppercase`}
+      suppressHydrationWarning
     >
       <body className="h-screen overflow-hidden uppercase">{children}</body>
     </html>

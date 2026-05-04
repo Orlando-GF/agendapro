@@ -52,6 +52,11 @@ alter table public.especialidades enable row level security;
 alter table public.horarios enable row level security;
 alter table public.terapeutas enable row level security;
 
+drop policy if exists "Allow all especialidades" on public.especialidades;
 create policy "Allow all especialidades" on public.especialidades for all to anon, authenticated, service_role using (true) with check (true);
+
+drop policy if exists "Allow all horarios" on public.horarios;
 create policy "Allow all horarios" on public.horarios for all to anon, authenticated, service_role using (true) with check (true);
+
+drop policy if exists "Allow all terapeutas" on public.terapeutas;
 create policy "Allow all terapeutas" on public.terapeutas for all to anon, authenticated, service_role using (true) with check (true);

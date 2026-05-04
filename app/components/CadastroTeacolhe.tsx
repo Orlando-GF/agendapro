@@ -6,10 +6,12 @@ import {
   listarTerapeutas, salvarTerapeuta, excluirTerapeuta,
   listarEspecialidades, salvarEspecialidade, excluirEspecialidade,
   listarHorarios, salvarHorario, excluirHorario,
-  listarSessoes, salvarSessao, excluirSessao, atualizarStatusSessao, moverSessao,
+  listarSessoes, salvarSessao, excluirSessao, atualizarStatusSessao, atualizarStatusTerapeutaSessao, moverSessao, cancelarSessoesDoDia,
   listarBloqueios, criarBloqueio, excluirBloqueio,
+  listarAusencias, salvarAusencia, excluirAusencia,
+  listarHistoricoPaciente, listarHistoricoTerapeuta, listarEstatisticasGerais,
   Patient, PatientFormData, Terapeuta, TerapeutaFormData, Especialidade, Horario, HorarioFormData,
-  Sessao, SessaoFormData, Bloqueio,
+  Sessao, SessaoFormData, Bloqueio, Ausencia, AusenciaFormData,
 } from '../actions'
 import { Sidebar } from './Sidebar'
 import { StatsCards } from './StatsCards'
@@ -24,12 +26,17 @@ import { HorarioForm } from './HorarioForm'
 import { CalendarioSemanal } from './CalendarioSemanal'
 import { SessoesView } from './SessoesView'
 import { SessaoForm } from './SessaoForm'
+import { RelatoriosView } from './RelatoriosView'
 import { RecepcaoView } from './RecepcaoView'
 import { ToastProvider } from './ToastProvider'
 import { ToastContainer } from './ToastContainer'
 import { useToast } from '../hooks/useToast'
+import { usePacientes } from '../hooks/usePacientes'
+import { useCrudList } from '../hooks/useCrudList'
+import { useAgenda } from '../hooks/useAgenda'
+import { useRecepcao } from '../hooks/useRecepcao'
 
-type View = 'agenda' | 'recepcao' | 'pacientes' | 'terapeutas' | 'especialidades' | 'horarios'
+type View = 'agenda' | 'recepcao' | 'pacientes' | 'terapeutas' | 'especialidades' | 'horarios' | 'relatorios'
 type FormType = 'paciente' | 'terapeuta' | 'especialidade' | 'horario' | 'sessao' | null
 
 interface InitialData {
@@ -49,9 +56,7 @@ function getSegundaDaSemana(d: Date): Date {
   return dia
 }
 
-function formatDateISO(d: Date): string {
-  return d.toISOString().split('T')[0]
-}
+import { formatDateISO } from '@/lib/date-helpers'
 
 function getSemanaFim(segunda: Date): Date {
   const sexta = new Date(segunda)
@@ -93,119 +98,45 @@ function CadastroTeacolheInner({
   const [formType, setFormType] = useState<FormType>(null)
 
   // Pacientes
-  const [pacientes, setPacientes] = useState<Patient[]>(initialPacientes)
   const [filtroPacientes, setFiltroPacientes] = useState('')
-  const [stats, setStats] = useState(initialStats)
+  const { pacientes, loading: loadingPacientes, stats, recarregar: recarregarPacientes } = usePacientes(filtroPacientes, toastError)
   const [pacienteEdicao, setPacienteEdicao] = useState<Patient | null>(null)
-  const [loadingPacientes, setLoadingPacientes] = useState(false)
 
   // Terapeutas
-  const [terapeutas, setTerapeutas] = useState<Terapeuta[]>(initialTerapeutas)
+  const { items: terapeutas, loading: loadingTerapeutas, recarregar: recarregarTerapeutas } = useCrudList<Terapeuta>(
+    view, 'terapeutas', { listar: listarTerapeutas }, toastError, initialTerapeutas
+  )
   const [terapeutaEdicao, setTerapeutaEdicao] = useState<Terapeuta | null>(null)
-  const [loadingTerapeutas, setLoadingTerapeutas] = useState(false)
+  const [ausencias, setAusencias] = useState<Ausencia[]>([])
 
   // Especialidades
-  const [especialidades, setEspecialidades] = useState<Especialidade[]>(initialEspecialidades)
+  const { items: especialidades, loading: loadingEspecialidades, recarregar: recarregarEspecialidades } = useCrudList<Especialidade>(
+    view, 'especialidades', { listar: listarEspecialidades }, toastError, initialEspecialidades
+  )
   const [especialidadeEdicao, setEspecialidadeEdicao] = useState<Especialidade | null>(null)
-  const [loadingEspecialidades, setLoadingEspecialidades] = useState(false)
 
   // Horários
-  const [horarios, setHorarios] = useState<Horario[]>(initialHorarios)
+  const { items: horarios, loading: loadingHorarios, recarregar: recarregarHorarios } = useCrudList<Horario>(
+    view, 'horarios', { listar: listarHorarios }, toastError, initialHorarios
+  )
   const [horarioEdicao, setHorarioEdicao] = useState<Horario | null>(null)
-  const [loadingHorarios, setLoadingHorarios] = useState(false)
 
   // Sessões / Agenda
-  const [sessoes, setSessoes] = useState<Sessao[]>([])
   const [semanaAtual, setSemanaAtual] = useState<Date>(getSegundaDaSemana(new Date()))
+  const { sessoes, bloqueios, ausencias: ausenciasAgenda, loading: loadingSessoes, recarregar: recarregarAgenda } = useAgenda(semanaAtual, view, toastError)
   const [sessaoEdicao, setSessaoEdicao] = useState<Sessao | null>(null)
-  const [loadingSessoes, setLoadingSessoes] = useState(false)
   const [agendaModo, setAgendaModo] = useState<'calendario' | 'lista'>('calendario')
   const [sessaoFormDefaults, setSessaoFormDefaults] = useState<{ data?: string; hora_inicio?: string; hora_fim?: string }>({})
   const [terapeutaFiltro, setTerapeutaFiltro] = useState<string>('')
 
-  // Bloqueios
-  const [bloqueios, setBloqueios] = useState<Bloqueio[]>([])
-
   // Recepção
-  const [sessoesHoje, setSessoesHoje] = useState<Sessao[]>([])
-  const [loadingRecepcao, setLoadingRecepcao] = useState(false)
+  const [dataRecepcao, setDataRecepcao] = useState<Date>(new Date())
+  const { sessoes: sessoesHoje, ausencias: ausenciasRecepcao, loading: loadingRecepcao, recarregar: recarregarRecepcao } = useRecepcao(dataRecepcao, view, toastError)
 
-  // Debounce no filtro de pacientes
-  useEffect(() => {
-    setLoadingPacientes(true)
-    const timer = setTimeout(() => {
-      listarPacientes(filtroPacientes || undefined)
-        .then(setPacientes)
-        .catch(err => toastError(err.message))
-        .finally(() => setLoadingPacientes(false))
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [filtroPacientes])
+  // Loading global para ações (salvar/excluir)
+  const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    contarPacientes().then(setStats).catch(err => toastError(err.message))
-  }, [pacientes.length])
 
-  // Carregar outras views lazy
-  useEffect(() => {
-    if (view !== 'terapeutas') return
-    setLoadingTerapeutas(true)
-    listarTerapeutas()
-      .then(setTerapeutas)
-      .catch(err => toastError(err.message))
-      .finally(() => setLoadingTerapeutas(false))
-  }, [view])
-
-  useEffect(() => {
-    if (view !== 'especialidades') return
-    setLoadingEspecialidades(true)
-    listarEspecialidades()
-      .then(setEspecialidades)
-      .catch(err => toastError(err.message))
-      .finally(() => setLoadingEspecialidades(false))
-  }, [view])
-
-  useEffect(() => {
-    if (view !== 'horarios') return
-    setLoadingHorarios(true)
-    listarHorarios()
-      .then(setHorarios)
-      .catch(err => toastError(err.message))
-      .finally(() => setLoadingHorarios(false))
-  }, [view])
-
-  // Carregar sessões
-  useEffect(() => {
-    if (view !== 'agenda') return
-    setLoadingSessoes(true)
-    const inicio = formatDateISO(semanaAtual)
-    const fim = formatDateISO(getSemanaFim(semanaAtual))
-    listarSessoes(inicio, fim)
-      .then(setSessoes)
-      .catch(err => toastError(err.message))
-      .finally(() => setLoadingSessoes(false))
-  }, [view, semanaAtual])
-
-  // Carregar sessões do dia (recepção)
-  useEffect(() => {
-    if (view !== 'recepcao') return
-    setLoadingRecepcao(true)
-    const hoje = formatDateISO(new Date())
-    listarSessoes(hoje, hoje)
-      .then(setSessoesHoje)
-      .catch(err => toastError(err.message))
-      .finally(() => setLoadingRecepcao(false))
-  }, [view])
-
-  // Carregar bloqueios
-  useEffect(() => {
-    if (view !== 'agenda') return
-    const inicio = formatDateISO(semanaAtual)
-    const fim = formatDateISO(getSemanaFim(semanaAtual))
-    listarBloqueios(inicio, fim)
-      .then(setBloqueios)
-      .catch(err => toastError(err.message))
-  }, [view, semanaAtual])
 
   const abrirForm = (tipo: FormType, item?: any) => {
     setFormType(tipo)
@@ -239,79 +170,136 @@ function CadastroTeacolheInner({
   }
 
   const recarregarView = async () => {
-    if (view === 'pacientes') {
-      const p = await listarPacientes(filtroPacientes || undefined)
-      setPacientes(p)
-      const c = await contarPacientes()
-      setStats(c)
-    }
-    if (view === 'terapeutas') setTerapeutas(await listarTerapeutas())
-    if (view === 'especialidades') setEspecialidades(await listarEspecialidades())
-    if (view === 'horarios') setHorarios(await listarHorarios())
-    if (view === 'agenda') {
-      const inicio = formatDateISO(semanaAtual)
-      const fim = formatDateISO(getSemanaFim(semanaAtual))
-      setSessoes(await listarSessoes(inicio, fim))
-      setBloqueios(await listarBloqueios(inicio, fim))
-    }
-    if (view === 'recepcao') {
-      const hoje = formatDateISO(new Date())
-      setSessoesHoje(await listarSessoes(hoje, hoje))
-    }
+    if (view === 'pacientes') await recarregarPacientes(filtroPacientes)
+    if (view === 'terapeutas') await recarregarTerapeutas()
+    if (view === 'especialidades') await recarregarEspecialidades()
+    if (view === 'horarios') await recarregarHorarios()
+    if (view === 'agenda') await recarregarAgenda()
+    if (view === 'recepcao') await recarregarRecepcao()
+    const a = await listarAusencias()
+    setAusencias(a)
   }
 
   const handleSalvarPaciente = async (dados: PatientFormData) => {
-    await salvarPaciente(dados)
-    fecharForm()
-    await recarregarView()
-  }
-
-  const handleSalvarTerapeuta = async (dados: TerapeutaFormData) => {
-    await salvarTerapeuta(dados)
-    fecharForm()
-    await recarregarView()
-  }
-
-  const handleSalvarEspecialidade = async (dados: { id?: string; nome: string }) => {
-    await salvarEspecialidade(dados)
-    fecharForm()
-    await recarregarView()
-  }
-
-  const handleSalvarHorario = async (dados: HorarioFormData) => {
-    await salvarHorario(dados)
-    fecharForm()
-    await recarregarView()
-  }
-
-  const handleSalvarSessao = async (dados: SessaoFormData) => {
-    await salvarSessao(dados)
-    fecharForm()
-    await recarregarView()
-  }
-
-  const handleMudarStatusSessao = async (id: string, status: string) => {
+    setSubmitting(true)
     try {
-      await atualizarStatusSessao(id, status)
-      success(`STATUS ATUALIZADO PARA ${status}`)
+      await salvarPaciente(dados)
+      fecharForm()
       await recarregarView()
     } catch (err: any) {
       toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSalvarTerapeuta = async (dados: TerapeutaFormData) => {
+    setSubmitting(true)
+    try {
+      await salvarTerapeuta(dados)
+      fecharForm()
+      await recarregarView()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSalvarEspecialidade = async (dados: { id?: string; nome: string }) => {
+    setSubmitting(true)
+    try {
+      await salvarEspecialidade(dados)
+      fecharForm()
+      await recarregarView()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSalvarHorario = async (dados: HorarioFormData) => {
+    setSubmitting(true)
+    try {
+      await salvarHorario(dados)
+      fecharForm()
+      await recarregarView()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSalvarSessao = async (dados: SessaoFormData) => {
+    setSubmitting(true)
+    try {
+      await salvarSessao(dados)
+      fecharForm()
+      await recarregarView()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleMudarStatusSessao = async (id: string, status: string) => {
+    setSubmitting(true)
+    try {
+      await atualizarStatusSessao(id, status)
+      success('Status atualizado')
+      await recarregarView()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleMudarStatusTerapeuta = async (sessaoId: string, terapeutaId: string, status: string) => {
+    setSubmitting(true)
+    try {
+      await atualizarStatusTerapeutaSessao(sessaoId, terapeutaId, status)
+      success('Status do terapeuta atualizado')
+      await recarregarView()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleCancelarDia = async (data: string, motivo: string) => {
+    setSubmitting(true)
+    try {
+      const qtd = await cancelarSessoesDoDia(data, motivo)
+      success(`${qtd} SESSÕES CANCELADAS — ${motivo}`)
+      await recarregarRecepcao()
+      await recarregarAgenda()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
     }
   }
 
   const handleExcluir = async (tipo: string, id: string) => {
-    if (!confirm('TEM CERTEZA QUE DESEJA EXCLUIR?')) return
+    if (!confirm('Tem certeza que deseja excluir?')) return
+    setSubmitting(true)
     try {
       if (tipo === 'paciente') await excluirPaciente(id)
       if (tipo === 'terapeuta') await excluirTerapeuta(id)
       if (tipo === 'especialidade') await excluirEspecialidade(id)
       if (tipo === 'horario') await excluirHorario(id)
       if (tipo === 'sessao') await excluirSessao(id)
-      success('EXCLUÍDO COM SUCESSO')
+      success('Excluído com sucesso')
       await recarregarView()
     } catch (err: any) {
       toastError(err.message)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -322,6 +310,7 @@ function CadastroTeacolheInner({
     terapeutas: 'Terapeutas',
     especialidades: 'Especialidades',
     horarios: 'Horários',
+    relatorios: 'Relatórios',
   }
 
   const btnLabels: Record<View, string> = {
@@ -331,6 +320,7 @@ function CadastroTeacolheInner({
     terapeutas: 'Novo Terapeuta',
     especialidades: 'Nova Especialidade',
     horarios: 'Novo Horário',
+    relatorios: 'Relatórios',
   }
 
   return (
@@ -368,21 +358,24 @@ function CadastroTeacolheInner({
                   className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 normal-case"
                 >
                   <option value="">TODOS</option>
-                  {terapeutas.map(t => (
+                  {terapeutas.filter(t => t.ativo !== false).map(t => (
                     <option key={t.id} value={t.id}>{t.nome}</option>
                   ))}
                 </select>
               </div>
             )}
-            <button
-              onClick={() => {
-                if (view === 'agenda' || view === 'recepcao') abrirSessaoForm()
-                else abrirForm(view === 'pacientes' ? 'paciente' : view === 'terapeutas' ? 'terapeuta' : view === 'especialidades' ? 'especialidade' : 'horario')
-              }}
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium uppercase"
-            >
-              + {btnLabels[view]}
-            </button>
+            {view !== 'relatorios' && (
+              <button
+                onClick={() => {
+                  if (view === 'agenda' || view === 'recepcao') abrirSessaoForm()
+                  else abrirForm(view === 'pacientes' ? 'paciente' : view === 'terapeutas' ? 'terapeuta' : view === 'especialidades' ? 'especialidade' : 'horario')
+                }}
+                disabled={submitting}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium uppercase disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                + {btnLabels[view]}
+              </button>
+            )}
           </div>
         </header>
 
@@ -395,7 +388,9 @@ function CadastroTeacolheInner({
                   sessoes={terapeutaFiltro ? sessoes.filter(s => (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : sessoes}
                   horarios={horarios}
                   bloqueios={bloqueios}
+                  ausencias={ausencias}
                   terapeutaFiltro={terapeutaFiltro}
+                  diasTrabalho={terapeutas.find(t => t.id === terapeutaFiltro)?.dias_trabalho}
                   semanaAtual={semanaAtual}
                   onMudarSemana={setSemanaAtual}
                   onNovaSessao={(data, horaInicio, horaFim) => abrirSessaoForm({ data, hora_inicio: horaInicio, hora_fim: horaFim })}
@@ -463,7 +458,7 @@ function CadastroTeacolheInner({
           {view === 'terapeutas' && (
             <>
               {loadingTerapeutas && <span className="text-sm text-gray-500 mb-2 block">Carregando...</span>}
-              <TerapeutasView terapeutas={terapeutas} onEditar={t => abrirForm('terapeuta', t)} onExcluir={id => handleExcluir('terapeuta', id)} />
+              <TerapeutasView terapeutas={terapeutas} ausencias={ausencias} onEditar={t => abrirForm('terapeuta', t)} onExcluir={id => handleExcluir('terapeuta', id)} />
             </>
           )}
 
@@ -484,8 +479,18 @@ function CadastroTeacolheInner({
           {view === 'recepcao' && (
             <>
               {loadingRecepcao && <span className="text-sm text-gray-500 mb-2 block">Carregando...</span>}
-              <RecepcaoView sessoes={sessoesHoje} onMudarStatus={handleMudarStatusSessao} />
+              <RecepcaoView sessoes={sessoesHoje} terapeutas={terapeutas} ausencias={ausenciasRecepcao} dataAtual={dataRecepcao} terapeutaFiltro={terapeutaFiltro} onMudarData={setDataRecepcao} onMudarStatus={handleMudarStatusSessao} onMudarStatusTerapeuta={handleMudarStatusTerapeuta} onCancelarDia={handleCancelarDia} />
             </>
+          )}
+
+          {view === 'relatorios' && (
+            <RelatoriosView
+              pacientes={pacientes}
+              terapeutas={terapeutas}
+              onBuscarPaciente={listarHistoricoPaciente}
+              onBuscarTerapeuta={listarHistoricoTerapeuta}
+              onBuscarGeral={listarEstatisticasGerais}
+            />
           )}
         </div>
       </main>
@@ -494,7 +499,7 @@ function CadastroTeacolheInner({
         <PacienteForm key={pacienteEdicao?.id || 'novo'} paciente={pacienteEdicao} onSalvar={handleSalvarPaciente} onCancelar={fecharForm} />
       )}
       {sidepanelAberto && formType === 'terapeuta' && (
-        <TerapeutaForm terapeuta={terapeutaEdicao} especialidades={especialidades} onSalvar={handleSalvarTerapeuta} onCancelar={fecharForm} />
+        <TerapeutaForm terapeuta={terapeutaEdicao} especialidades={especialidades} ausencias={ausencias} onSalvar={handleSalvarTerapeuta} onSalvarAusencia={async (d) => { await salvarAusencia(d); await listarAusencias().then(setAusencias) }} onExcluirAusencia={async (id) => { await excluirAusencia(id); setAusencias(prev => prev.filter(a => a.id !== id)) }} onCancelar={fecharForm} />
       )}
       {sidepanelAberto && formType === 'especialidade' && (
         <EspecialidadeForm especialidade={especialidadeEdicao} onSalvar={handleSalvarEspecialidade} onCancelar={fecharForm} />

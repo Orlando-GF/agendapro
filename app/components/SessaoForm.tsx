@@ -18,6 +18,12 @@ interface Props {
   onCancelar: () => void
 }
 
+function diaDaSemanaFormatado(dataISO: string): string {
+  const dias = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado']
+  const d = new Date(dataISO + 'T00:00:00')
+  return dias[d.getDay()]
+}
+
 const STATUS_OPCOES = [
   'AGENDADO',
   'PRESENTE',
@@ -30,16 +36,26 @@ const STATUS_OPCOES = [
   'REPOSTO',
 ]
 
+const TIPO_OPCOES = [
+  { value: 'SESSAO', label: 'SESSÃO' },
+  { value: 'OFICINA', label: 'OFICINA' },
+  { value: 'REUNIAO', label: 'REUNIÃO' },
+  { value: 'OUTRO', label: 'OUTRO' },
+]
+
 function buildInitialForm(sessao: Sessao | null | undefined, defaults?: { data?: string; hora_inicio?: string; hora_fim?: string }): SessaoFormData {
   if (sessao) {
     return {
       id: sessao.id,
-      paciente_id: sessao.paciente_id,
+      paciente_id: sessao.paciente_id || '',
       data: sessao.data,
       hora_inicio: sessao.hora_inicio.slice(0, 5),
       hora_fim: sessao.hora_fim.slice(0, 5),
       status: sessao.status,
       observacoes: sessao.observacoes ?? null,
+      tipo: sessao.tipo ?? 'SESSAO',
+      titulo: sessao.titulo ?? null,
+      recorrente: sessao.recorrente ?? false,
       terapeutas_ids: (sessao.terapeutas || []).map(t => t.id),
     }
   }
@@ -50,6 +66,9 @@ function buildInitialForm(sessao: Sessao | null | undefined, defaults?: { data?:
     hora_fim: defaults?.hora_fim || '',
     status: 'AGENDADO',
     observacoes: null,
+    tipo: 'SESSAO',
+    titulo: null,
+    recorrente: false,
     terapeutas_ids: [],
   }
 }
@@ -74,7 +93,8 @@ export function SessaoForm({ sessao, pacientes, terapeutas, horarios, defaultDat
 
   const validar = (): boolean => {
     const next: Record<string, string> = {}
-    if (!form.paciente_id) next.paciente_id = 'PACIENTE É OBRIGATÓRIO'
+    if (form.tipo === 'SESSAO' && !form.paciente_id) next.paciente_id = 'PACIENTE É OBRIGATÓRIO'
+    if (form.tipo !== 'SESSAO' && !form.titulo?.trim()) next.titulo = 'TÍTULO É OBRIGATÓRIO'
     if (!form.data) next.data = 'DATA É OBRIGATÓRIA'
     if (!form.hora_inicio) next.hora_inicio = 'HORÁRIO É OBRIGATÓRIO'
     if (form.terapeutas_ids.length === 0) next.terapeutas_ids = 'SELECIONE PELO MENOS 1 TERAPEUTA'
@@ -98,15 +118,57 @@ export function SessaoForm({ sessao, pacientes, terapeutas, horarios, defaultDat
   return (
     <SidepanelContainer titulo={sessao ? 'EDITAR SESSÃO' : 'NOVA SESSÃO'} onFechar={onCancelar}>
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
-        {/* Paciente */}
-        <SearchableSelect
-          label="PACIENTE *"
-          placeholder="SELECIONE O PACIENTE..."
-          items={pacientes.map(p => ({ id: p.id, label: p.nome, subtitle: p.codigo || undefined }))}
-          value={form.paciente_id}
-          onChange={id => handleChange('paciente_id', id)}
-          erro={erros.paciente_id}
-        />
+        {/* Tipo */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">TIPO *</label>
+          <select
+            value={form.tipo ?? 'SESSAO'}
+            onChange={e => handleChange('tipo', e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            {TIPO_OPCOES.map(t => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Título (só para não-SESSAO) */}
+        {form.tipo !== 'SESSAO' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">TÍTULO *</label>
+            <input
+              type="text"
+              value={form.titulo ?? ''}
+              onChange={e => handleChange('titulo', e.target.value || null)}
+              placeholder="Ex: Grupo de Pais e Mães"
+              className={`w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 ${inputErro('titulo')}`}
+            />
+            {erros.titulo && <p className="mt-1 text-xs text-red-600">{erros.titulo}</p>}
+          </div>
+        )}
+
+        {/* Recorrente */}
+        <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.recorrente ?? false}
+            onChange={e => handleChange('recorrente', e.target.checked)}
+            className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm font-medium text-gray-700">RECORRENTE (repete toda semana)</span>
+        </label>
+
+        {/* Paciente (só para SESSAO) */}
+        {form.tipo === 'SESSAO' && (
+          <SearchableSelect
+            label="PACIENTE *"
+            placeholder="SELECIONE O PACIENTE..."
+            items={pacientes.filter(p => (p.status_tratamento ?? 'EM_TRATAMENTO') === 'EM_TRATAMENTO').map(p => ({ id: p.id, label: p.nome, subtitle: p.codigo || undefined }))}
+            value={form.paciente_id || ''}
+            onChange={id => handleChange('paciente_id', id)}
+            erro={erros.paciente_id}
+          />
+        )}
 
         {/* Data */}
         <div>
@@ -145,7 +207,10 @@ export function SessaoForm({ sessao, pacientes, terapeutas, horarios, defaultDat
         <SearchableMultiSelect
           label="TERAPEUTAS *"
           placeholder="SELECIONE OS TERAPEUTAS..."
-          items={terapeutas.map(t => ({ id: t.id, label: t.nome, subtitle: t.especialidade_nome || undefined }))}
+          items={terapeutas
+            .filter(t => t.ativo !== false)
+            .filter(t => !form.data || !t.dias_trabalho || t.dias_trabalho.length === 0 || t.dias_trabalho.includes(diaDaSemanaFormatado(form.data)))
+            .map(t => ({ id: t.id, label: t.nome, subtitle: t.especialidade_nome || undefined }))}
           value={form.terapeutas_ids}
           onChange={ids => handleChange('terapeutas_ids', ids)}
           erro={erros.terapeutas_ids}

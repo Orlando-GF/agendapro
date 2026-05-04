@@ -45,11 +45,22 @@ export function SessoesView({ sessoes, onEditar, onExcluir }: Props) {
               <tr key={s.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{s.data.split('-').reverse().join('/')}</td>
                 <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{s.hora_inicio.slice(0, 5)} - {s.hora_fim.slice(0, 5)}</td>
-                <td className="px-4 py-3 font-medium text-gray-900">{s.paciente_nome}</td>
+                <td className="px-4 py-3 font-medium text-gray-900">
+                  {s.tipo !== 'SESSAO' ? (
+                    <div>
+                      <div className="font-bold">{s.recorrente ? '↻ ' : ''}{s.titulo || s.tipo}</div>
+                      <div className="text-[10px] text-gray-500">{s.tipo}</div>
+                    </div>
+                  ) : (
+                    <div className="font-bold">{s.recorrente ? '↻ ' : ''}{s.paciente_nome}</div>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-gray-600">
                   <div className="flex flex-col gap-0.5">
                     {(s.terapeutas || []).map(t => (
-                      <span key={t.id} className="text-xs text-gray-700">{t.nome}</span>
+                      <span key={t.id} className={`text-xs ${t.ativo === false ? 'text-red-500 line-through' : 'text-gray-700'}`}>
+                        {t.nome}{t.ativo === false ? ' (inativo)' : ''}
+                      </span>
                     ))}
                   </div>
                 </td>

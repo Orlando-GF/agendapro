@@ -46,6 +46,7 @@ create or replace trigger patients_updated_at
 -- Em produção, isso deve ser refinado conforme autenticação
 alter table public.patients enable row level security;
 
+drop policy if exists "Allow all" on public.patients;
 create policy "Allow all" on public.patients
   for all
   to anon, authenticated, service_role

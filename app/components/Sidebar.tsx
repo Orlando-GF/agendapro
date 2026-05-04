@@ -12,6 +12,7 @@ const items = [
   { id: 'terapeutas', label: 'Terapeutas' },
   { id: 'especialidades', label: 'Especialidades' },
   { id: 'horarios', label: 'Horários' },
+  { id: 'relatorios', label: 'Relatórios' },
 ]
 
 export function Sidebar({ viewAtiva, onMudarView }: Props) {

@@ -14,6 +14,8 @@ create index if not exists idx_paciente_terapeutas_terapeuta on public.paciente_
 
 -- RLS
 alter table public.paciente_terapeutas enable row level security;
+
+drop policy if exists "Allow all paciente_terapeutas" on public.paciente_terapeutas;
 create policy "Allow all paciente_terapeutas" on public.paciente_terapeutas for all to anon, authenticated, service_role using (true) with check (true);
 
 -- Função para listar terapeutas de um paciente

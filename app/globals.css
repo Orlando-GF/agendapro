@@ -69,4 +69,83 @@
   code, pre, kbd, samp {
     text-transform: none !important;
   }
+
+  /* Restaurar cursor pointer em elementos interativos (Tailwind v4 remove por padrao) */
+  button, [role="button"], a, input[type="submit"], input[type="button"], label[for], select {
+    cursor: pointer;
+  }
+
+  /* Esconde elementos de impressão na tela */
+  .print-only {
+    display: none !important;
+  }
+}
+
+@media print {
+  /* Configura página: orientação paisagem e margens reduzidas */
+  @page {
+    size: landscape;
+    margin: 8mm;
+  }
+
+  /* Esconde sidebar, header principal, toasts e elementos .no-print */
+  aside,
+  header.bg-white.border-b,
+  .toast-container,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Mostra elementos de impressão */
+  .print-only {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  /* Faz o conteúdo principal ocupar toda a largura */
+  main.flex-1 {
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* Remove padding do container de conteúdo */
+  main > div.flex-1.overflow-auto.p-6 {
+    padding: 0 !important;
+  }
+
+  /* Mostra apenas o conteúdo das tabelas/calendário */
+  .bg-white.rounded-lg.border {
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+  }
+
+  /* Tabela de impressão: ajusta para caber na página */
+  .print-only table {
+    width: 100% !important;
+    table-layout: auto !important;
+    font-size: 9px !important;
+    border-collapse: collapse !important;
+  }
+
+  .print-only th,
+  .print-only td {
+    padding: 3px 4px !important;
+    word-break: break-word !important;
+    vertical-align: top !important;
+  }
+
+  /* Evita quebra de página dentro de linhas */
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* Força fundo branco */
+  body {
+    background: white !important;
+  }
+
+  /* Esconde elementos com classe print-hidden */
+  .print-hidden {
+    display: none !important;
+  }
 }

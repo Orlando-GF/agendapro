@@ -17,6 +17,9 @@ export interface Patient {
   whatsapp_adicionado?: boolean | null
   judicial?: boolean | null
   observacoes?: string | null
+  status_tratamento?: string | null
+  motivo_saida?: string | null
+  data_saida?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -33,6 +36,9 @@ export interface PatientFormData {
   whatsapp_adicionado?: boolean | null
   judicial?: boolean | null
   observacoes?: string | null
+  status_tratamento?: string | null
+  motivo_saida?: string | null
+  data_saida?: string | null
 }
 
 // ========== TERAPEUTAS ==========
@@ -43,6 +49,8 @@ export interface Terapeuta {
   telefone?: string | null
   especialidade_id?: string | null
   especialidade_nome?: string | null
+  dias_trabalho?: string[] | null
+  ativo?: boolean | null
   created_at?: string | null
 }
 
@@ -51,6 +59,8 @@ export interface TerapeutaFormData {
   nome: string
   telefone?: string | null
   especialidade_id?: string | null
+  dias_trabalho?: string[] | null
+  ativo?: boolean | null
 }
 
 // ========== ESPECIALIDADES ==========
@@ -84,17 +94,23 @@ export interface SessaoTerapeuta {
   id: string
   nome: string
   especialidade_nome?: string | null
+  ativo?: boolean | null
+  status?: string | null
 }
 
 export interface Sessao {
   id: string
-  paciente_id: string
+  paciente_id?: string | null
   paciente_nome?: string
+  paciente_codigo?: string | null
   data: string
   hora_inicio: string
   hora_fim: string
   status: string
   observacoes?: string | null
+  tipo?: string | null
+  titulo?: string | null
+  recorrente?: boolean | null
   terapeutas?: SessaoTerapeuta[]
   created_at?: string | null
   updated_at?: string | null
@@ -102,12 +118,15 @@ export interface Sessao {
 
 export interface SessaoFormData {
   id?: string
-  paciente_id: string
+  paciente_id?: string | null
   data: string
   hora_inicio: string
   hora_fim: string
   status: string
   observacoes?: string | null
+  tipo?: string | null
+  titulo?: string | null
+  recorrente?: boolean | null
   terapeutas_ids: string[]
 }
 
@@ -126,7 +145,10 @@ export async function listarPacientes(filtro?: string): Promise<Patient[]> {
     .from('patients')
     .select('*')
     .order('nome', { ascending: true })
-  if (filtro) query = query.or(`nome.ilike.%${filtro}%,codigo.ilike.%${filtro}%`)
+  if (filtro) {
+    const term = `%${filtro}%`
+    query = query.or(`nome.ilike.${term},codigo.ilike.${term}`)
+  }
   const { data: rows, error } = await query
   if (error) throw new Error(error.message)
   return (rows as Patient[]) || []
@@ -145,6 +167,9 @@ export async function salvarPaciente(dados: PatientFormData): Promise<Patient> {
     whatsapp_adicionado: dados.whatsapp_adicionado ?? false,
     judicial: dados.judicial ?? false,
     observacoes: toUpper(dados.observacoes),
+    status_tratamento: dados.status_tratamento ?? 'EM_TRATAMENTO',
+    motivo_saida: toUpper(dados.motivo_saida),
+    data_saida: dados.data_saida || null,
   }
   if (dados.id) {
     const { data, error } = await supabase.from('patients').update(normalizado).eq('id', dados.id).select().single()
@@ -188,8 +213,8 @@ export async function listarTerapeutas(): Promise<Terapeuta[]> {
     .select('*, especialidades(nome)')
     .order('nome', { ascending: true })
   if (error) throw new Error(error.message)
-  return ((data as unknown[]) || []).map(t => {
-    const row = t as Record<string, unknown>
+  return ((data as Terapeuta[]) || []).map(t => {
+    const row = t as unknown as Record<string, unknown>
     return {
       ...row,
       especialidade_nome: (row.especialidades as { nome?: string } | null)?.nome || null,
@@ -203,6 +228,8 @@ export async function salvarTerapeuta(dados: TerapeutaFormData): Promise<Terapeu
     ...dados,
     nome: toUpper(dados.nome) ?? '',
     telefone: toUpper(dados.telefone),
+    dias_trabalho: dados.dias_trabalho ?? [],
+    ativo: dados.ativo ?? true,
   }
   if (normalizado.id) {
     const { id, ...updateData } = normalizado
@@ -258,7 +285,7 @@ export async function listarHorarios(): Promise<Horario[]> {
   const supabase = createAdminClient()
   const { data, error } = await supabase.from('horarios').select('*').order('ordem', { ascending: true })
   if (error) throw new Error(error.message)
-  return (data as unknown as Horario[]) || []
+  return (data as Horario[]) || []
 }
 
 export async function salvarHorario(dados: HorarioFormData): Promise<Horario> {
@@ -267,11 +294,11 @@ export async function salvarHorario(dados: HorarioFormData): Promise<Horario> {
     const { id, ...updateData } = dados
     const { data, error } = await supabase.from('horarios').update(updateData).eq('id', id).select().single()
     if (error) throw new Error(error.message)
-    return data as unknown as Horario
+    return data as Horario
   } else {
     const { data, error } = await supabase.from('horarios').insert(dados).select().single()
     if (error) throw new Error(error.message)
-    return data as unknown as Horario
+    return data as Horario
   }
 }
 
@@ -285,23 +312,29 @@ export async function excluirHorario(id: string): Promise<void> {
 
 export async function listarSessoes(dataInicio: string, dataFim: string): Promise<Sessao[]> {
   const supabase = createAdminClient()
+  // Gera sessoes recorrentes automaticamente ate a data fim
+  await supabase.rpc('gerar_sessoes_recorrentes', { p_data_limite: dataFim })
   const { data, error } = await supabase.rpc('listar_sessoes_completas', {
     p_data_inicio: dataInicio,
     p_data_fim: dataFim,
   })
   if (error) throw new Error(error.message)
-  const rows = (data as unknown as any[]) || []
+  const rows = (data as Sessao[]) || []
   return rows.map(row => ({
     id: row.id,
     paciente_id: row.paciente_id,
     paciente_nome: row.paciente_nome,
+    paciente_codigo: row.paciente_codigo,
     data: row.data,
     hora_inicio: row.hora_inicio,
     hora_fim: row.hora_fim,
     status: row.status,
     observacoes: row.observacoes,
+    tipo: row.tipo,
+    titulo: row.titulo,
+    recorrente: row.recorrente,
     terapeutas: Array.isArray(row.terapeutas)
-      ? row.terapeutas.filter((t: any) => t && t.id).map((t: any) => ({ id: t.id, nome: t.nome, especialidade_nome: t.especialidade_nome }))
+      ? row.terapeutas.filter((t: any) => t && t.id).map((t: any) => ({ id: t.id, nome: t.nome, especialidade_nome: t.especialidade_nome, ativo: t.ativo, status: t.status }))
       : [],
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -310,13 +343,33 @@ export async function listarSessoes(dataInicio: string, dataFim: string): Promis
 
 export async function salvarSessao(dados: SessaoFormData): Promise<Sessao> {
   const supabase = createAdminClient()
+
+  // Validacoes de negocio
+  if (dados.tipo === 'SESSAO' && !dados.paciente_id) {
+    throw new Error('Sessao do tipo SESSAO deve ter um paciente vinculado')
+  }
+  if (!dados.terapeutas_ids || dados.terapeutas_ids.length === 0) {
+    throw new Error('A sessao deve ter pelo menos um terapeuta')
+  }
+
+  // Verifica se terapeutas estao ativos
+  const { data: terapeutasAtivos, error: errTerapeutas } = await supabase
+    .from('terapeutas')
+    .select('id, ativo')
+    .in('id', dados.terapeutas_ids)
+  if (errTerapeutas) throw new Error(errTerapeutas.message)
+  const inativos = (terapeutasAtivos || []).filter((t: any) => t.ativo === false)
+  if (inativos.length > 0) {
+    throw new Error(`Terapeuta(s) inativo(s) nao podem ser vinculados: ${inativos.map((t: any) => t.id).join(', ')}`)
+  }
+
   const { terapeutas_ids, ...sessaoData } = dados
   const { data, error } = await supabase.rpc('salvar_sessao_completa', {
     p_sessao: sessaoData,
     p_terapeutas_ids: terapeutas_ids || [],
   })
   if (error) throw new Error(error.message)
-  return (data as unknown as Sessao) || ({} as Sessao)
+  return data as Sessao
 }
 
 export async function atualizarStatusSessao(id: string, status: string): Promise<void> {
@@ -329,6 +382,199 @@ export async function excluirSessao(id: string): Promise<void> {
   const supabase = createAdminClient()
   const { error } = await supabase.from('sessoes').delete().eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+export async function cancelarSessoesDoDia(data: string, motivo: string): Promise<number> {
+  const supabase = createAdminClient()
+  const observacao = motivo ? `DIA NAO FUNCIONOU: ${motivo}` : 'DIA NAO FUNCIONOU'
+  const { data: rows, error } = await supabase
+    .from('sessoes')
+    .update({ status: 'CANCELADO', observacoes: observacao })
+    .eq('data', data)
+    .eq('status', 'AGENDADO')
+    .select('id')
+  if (error) throw new Error(error.message)
+  return (rows || []).length
+}
+
+export async function moverSessao(
+  id: string,
+  novaData: string,
+  novaHoraInicio: string,
+  novaHoraFim: string
+): Promise<void> {
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('sessoes')
+    .update({ data: novaData, hora_inicio: novaHoraInicio, hora_fim: novaHoraFim })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+// ========== RELATÓRIOS ==========
+
+export interface SessaoHistorico {
+  id: string
+  data: string
+  hora_inicio: string
+  hora_fim: string
+  status: string
+  tipo: string
+  titulo?: string | null
+  paciente_nome?: string | null
+  terapeutas: string[]
+}
+
+export interface StatsResumo {
+  total: number
+  presente: number
+  falta: number
+  faltaJustificada: number
+  atestado: number
+  atestadoProfissional: number
+  faltaProfissional: number
+  cancelado: number
+  taxaComparecimento: number
+}
+
+export async function listarHistoricoPaciente(
+  pacienteId: string,
+  dataInicio: string,
+  dataFim: string
+): Promise<{ sessoes: SessaoHistorico[]; stats: StatsResumo }> {
+  const supabase = createAdminClient()
+
+  const { data: rows, error } = await supabase
+    .from('sessoes')
+    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome), sessao_terapeutas(terapeutas(nome))')
+    .eq('paciente_id', pacienteId)
+    .gte('data', dataInicio)
+    .lte('data', dataFim)
+    .order('data', { ascending: false })
+
+  if (error) throw new Error(error.message)
+
+  const sessoes: SessaoHistorico[] = (rows || []).map((row: any) => ({
+    id: row.id,
+    data: row.data,
+    hora_inicio: row.hora_inicio,
+    hora_fim: row.hora_fim,
+    status: row.status,
+    tipo: row.tipo,
+    titulo: row.titulo,
+    paciente_nome: row.patients?.nome || null,
+    terapeutas: (row.sessao_terapeutas || []).map((st: any) => st.terapeutas?.nome).filter(Boolean),
+  }))
+
+  const stats = calcularStats(sessoes)
+  return { sessoes, stats }
+}
+
+export async function listarHistoricoTerapeuta(
+  terapeutaId: string,
+  dataInicio: string,
+  dataFim: string
+): Promise<{ sessoes: SessaoHistorico[]; stats: StatsResumo }> {
+  const supabase = createAdminClient()
+
+  // Busca sessoes onde o terapeuta participou
+  const { data: stRows, error: stError } = await supabase
+    .from('sessao_terapeutas')
+    .select('sessao_id')
+    .eq('terapeuta_id', terapeutaId)
+
+  if (stError) throw new Error(stError.message)
+
+  const sessaoIds = (stRows || []).map((r: any) => r.sessao_id)
+  if (sessaoIds.length === 0) return { sessoes: [], stats: calcularStats([]) }
+
+  const { data: rows, error } = await supabase
+    .from('sessoes')
+    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome), sessao_terapeutas(terapeutas(nome))')
+    .in('id', sessaoIds)
+    .gte('data', dataInicio)
+    .lte('data', dataFim)
+    .order('data', { ascending: false })
+
+  if (error) throw new Error(error.message)
+
+  const sessoes: SessaoHistorico[] = (rows || []).map((row: any) => ({
+    id: row.id,
+    data: row.data,
+    hora_inicio: row.hora_inicio,
+    hora_fim: row.hora_fim,
+    status: row.status,
+    tipo: row.tipo,
+    titulo: row.titulo,
+    paciente_nome: row.patients?.nome || null,
+    terapeutas: (row.sessao_terapeutas || []).map((st: any) => st.terapeutas?.nome).filter(Boolean),
+  }))
+
+  const stats = calcularStats(sessoes)
+  return { sessoes, stats }
+}
+
+export async function listarEstatisticasGerais(
+  dataInicio: string,
+  dataFim: string
+): Promise<{ stats: StatsResumo; porPaciente: { paciente_id: string; nome: string; total: number; presente: number; taxa: number }[] }> {
+  const supabase = createAdminClient()
+
+  const { data: rows, error } = await supabase
+    .from('sessoes')
+    .select('id, status, paciente_id, patients(nome)')
+    .gte('data', dataInicio)
+    .lte('data', dataFim)
+
+  if (error) throw new Error(error.message)
+
+  const sessoes = rows || []
+  const stats = calcularStats(sessoes.map((r: any) => ({ status: r.status })))
+
+  // Agrupa por paciente
+  const map = new Map<string, { nome: string; total: number; presente: number }>()
+  for (const r of sessoes) {
+    const pid = r.paciente_id
+    if (!pid) continue
+    const existente = map.get(pid)
+    if (existente) {
+      existente.total++
+      if (r.status === 'PRESENTE') existente.presente++
+    } else {
+      const pacienteNome = Array.isArray((r as any).patients) ? (r as any).patients[0]?.nome : (r as any).patients?.nome
+      map.set(pid, {
+        nome: pacienteNome || '-',
+        total: 1,
+        presente: r.status === 'PRESENTE' ? 1 : 0,
+      })
+    }
+  }
+
+  const porPaciente = Array.from(map.entries())
+    .map(([id, v]) => ({
+      paciente_id: id,
+      nome: v.nome,
+      total: v.total,
+      presente: v.presente,
+      taxa: v.total > 0 ? Math.round((v.presente / v.total) * 100) : 0,
+    }))
+    .sort((a, b) => b.taxa - a.taxa)
+
+  return { stats, porPaciente }
+}
+
+function calcularStats(sessoes: { status: string }[]): StatsResumo {
+  const total = sessoes.length
+  const presente = sessoes.filter(s => s.status === 'PRESENTE').length
+  const falta = sessoes.filter(s => s.status === 'FALTA').length
+  const faltaJustificada = sessoes.filter(s => s.status === 'FALTA_JUSTIFICADA').length
+  const atestado = sessoes.filter(s => s.status === 'ATESTADO').length
+  const atestadoProfissional = sessoes.filter(s => s.status === 'ATESTADO_PROFISSIONAL').length
+  const faltaProfissional = sessoes.filter(s => s.status === 'FALTA_PROFISSIONAL').length
+  const cancelado = sessoes.filter(s => s.status === 'CANCELADO').length
+  const taxaComparecimento = total > 0 ? Math.round((presente / total) * 100) : 0
+
+  return { total, presente, falta, faltaJustificada, atestado, atestadoProfissional, faltaProfissional, cancelado, taxaComparecimento }
 }
 
 // ========== BLOQUEIOS ==========
@@ -346,32 +592,36 @@ export interface Bloqueio {
 
 export async function listarBloqueios(dataInicio: string, dataFim: string): Promise<Bloqueio[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('bloqueios')
-    .select('*')
-    .order('hora_inicio', { ascending: true })
+  const { data, error } = await supabase.rpc('listar_bloqueios_semana', {
+    p_data_inicio: dataInicio,
+    p_data_fim: dataFim,
+  })
   if (error) throw new Error(error.message)
-
-  const base = (data as unknown as Bloqueio[]) || []
-  const result: Bloqueio[] = []
-  const inicio = new Date(dataInicio + 'T00:00:00')
-  const fim = new Date(dataFim + 'T00:00:00')
-
-  for (const b of base) {
-    const diaSemana = b.dia_semana ?? new Date(b.data + 'T00:00:00').getDay()
-    for (let d = new Date(inicio); d <= fim; d.setDate(d.getDate() + 1)) {
-      if (d.getDay() === diaSemana) {
-        const iso = d.toISOString().split('T')[0]
-        result.push({ ...b, data: iso, dia_semana: diaSemana })
-      }
-    }
-  }
-
-  return result
+  return (data as Bloqueio[]) || []
 }
 
 export async function criarBloqueio(dados: { terapeuta_id: string; data: string; hora_inicio: string; hora_fim: string; motivo?: string }): Promise<Bloqueio> {
   const supabase = createAdminClient()
+
+  // Verifica sobreposicao de bloqueios
+  const { data: existentes, error: errExistentes } = await supabase
+    .from('bloqueios')
+    .select('id, hora_inicio, hora_fim')
+    .eq('terapeuta_id', dados.terapeuta_id)
+    .eq('data', dados.data)
+  if (errExistentes) throw new Error(errExistentes.message)
+
+  const novoInicio = dados.hora_inicio.slice(0, 5)
+  const novoFim = dados.hora_fim.slice(0, 5)
+  const sobreposto = (existentes || []).some((b: any) => {
+    const exInicio = b.hora_inicio.slice(0, 5)
+    const exFim = b.hora_fim.slice(0, 5)
+    return (novoInicio < exFim && novoFim > exInicio)
+  })
+  if (sobreposto) {
+    throw new Error('Ja existe um bloqueio neste horario para este terapeuta')
+  }
+
   const dia_semana = new Date(dados.data + 'T00:00:00').getDay()
   const { data, error } = await supabase
     .from('bloqueios')
@@ -388,16 +638,99 @@ export async function excluirBloqueio(id: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
-export async function moverSessao(
-  id: string,
-  novaData: string,
-  novaHoraInicio: string,
-  novaHoraFim: string
-): Promise<void> {
+// ========== AUSENCIAS (FERIAS/FOLGAS) ==========
+
+export interface Ausencia {
+  id: string
+  terapeuta_id: string
+  data_inicio: string
+  data_fim: string
+  motivo: string
+  created_at?: string | null
+}
+
+export interface AusenciaFormData {
+  id?: string
+  terapeuta_id: string
+  data_inicio: string
+  data_fim: string
+  motivo: string
+}
+
+export async function listarAusencias(): Promise<Ausencia[]> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('ausencias')
+    .select('*')
+    .order('data_inicio', { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data as Ausencia[]) || []
+}
+
+export async function salvarAusencia(dados: AusenciaFormData): Promise<Ausencia> {
+  const supabase = createAdminClient()
+
+  // Validacoes
+  if (dados.data_inicio > dados.data_fim) {
+    throw new Error('Data de inicio nao pode ser posterior a data de fim')
+  }
+
+  // Verifica sobreposicao com ausencias existentes
+  const { data: existentes, error: errExistentes } = await supabase
+    .from('ausencias')
+    .select('id, data_inicio, data_fim')
+    .eq('terapeuta_id', dados.terapeuta_id)
+  if (errExistentes) throw new Error(errExistentes.message)
+
+  const sobreposto = (existentes || []).filter((a: any) => a.id !== dados.id).some((a: any) => {
+    return (dados.data_inicio <= a.data_fim && dados.data_fim >= a.data_inicio)
+  })
+  if (sobreposto) {
+    throw new Error('Ja existe uma ausencia neste periodo para este terapeuta')
+  }
+
+  if (dados.id) {
+    const { data, error } = await supabase
+      .from('ausencias')
+      .update({
+        terapeuta_id: dados.terapeuta_id,
+        data_inicio: dados.data_inicio,
+        data_fim: dados.data_fim,
+        motivo: dados.motivo,
+      })
+      .eq('id', dados.id)
+      .select()
+      .single()
+    if (error) throw new Error(error.message)
+    return data as Ausencia
+  } else {
+    const { data, error } = await supabase
+      .from('ausencias')
+      .insert({
+        terapeuta_id: dados.terapeuta_id,
+        data_inicio: dados.data_inicio,
+        data_fim: dados.data_fim,
+        motivo: dados.motivo,
+      })
+      .select()
+      .single()
+    if (error) throw new Error(error.message)
+    return data as Ausencia
+  }
+}
+
+export async function excluirAusencia(id: string): Promise<void> {
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('ausencias').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function atualizarStatusTerapeutaSessao(sessaoId: string, terapeutaId: string, status: string): Promise<void> {
   const supabase = createAdminClient()
   const { error } = await supabase
-    .from('sessoes')
-    .update({ data: novaData, hora_inicio: novaHoraInicio, hora_fim: novaHoraFim })
-    .eq('id', id)
+    .from('sessao_terapeutas')
+    .update({ status })
+    .eq('sessao_id', sessaoId)
+    .eq('terapeuta_id', terapeutaId)
   if (error) throw new Error(error.message)
 }

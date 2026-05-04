@@ -13,16 +13,34 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
-import { Sessao, Horario, Bloqueio } from '../actions'
+import { Sessao, Horario, Bloqueio, Ausencia } from '../actions'
 import { ListaSessoesCelula } from './ListaSessoesCelula'
+import { formatDateISO, formatDateBRFromISO, formatarAgendaWhatsApp } from '@/lib/date-helpers'
+import { STATUS_COR } from '@/lib/status-helpers'
+import { useToast } from '../hooks/useToast'
+import { AgendaPrintView } from './AgendaPrintView'
 
 const DIAS = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA']
+
+function normalizarDiaBanco(dia: string): string {
+  const map: Record<string, string> = {
+    'segunda-feira': 'SEGUNDA',
+    'terça-feira': 'TERÇA',
+    'terca-feira': 'TERÇA',
+    'quarta-feira': 'QUARTA',
+    'quinta-feira': 'QUINTA',
+    'sexta-feira': 'SEXTA',
+  }
+  return map[dia.toLowerCase().trim()] || dia.toUpperCase()
+}
 
 interface Props {
   sessoes: Sessao[]
   horarios: Horario[]
   bloqueios: Bloqueio[]
+  ausencias?: Ausencia[]
   terapeutaFiltro: string
+  diasTrabalho?: string[] | null
   semanaAtual: Date
   onMudarSemana: (d: Date) => void
   onNovaSessao: (data: string, horaInicio: string, horaFim: string) => void
@@ -36,14 +54,7 @@ interface Props {
   ) => Promise<void>
 }
 
-function formatDateISO(d: Date): string {
-  return d.toISOString().split('T')[0]
-}
 
-function formatDateBR(isoDate: string): string {
-  const [ano, mes, dia] = isoDate.split('-')
-  return `${dia}/${mes}/${ano}`
-}
 
 function getSemana(d: Date): Date[] {
   const semana: Date[] = []
@@ -69,17 +80,7 @@ function corPredominante(sessoes: Sessao[]): string {
   return sessoes[0].status
 }
 
-const STATUS_COR = {
-  AGENDADO: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-  PRESENTE: 'bg-green-100 text-green-800 border-green-300',
-  FALTA: 'bg-red-100 text-red-800 border-red-300',
-  FALTA_JUSTIFICADA: 'bg-orange-100 text-orange-800 border-orange-300',
-  ATESTADO: 'bg-purple-100 text-purple-800 border-purple-300',
-  ATESTADO_PROFISSIONAL: 'bg-indigo-100 text-indigo-800 border-indigo-300',
-  FALTA_PROFISSIONAL: 'bg-pink-100 text-pink-800 border-pink-300',
-  CANCELADO: 'bg-gray-100 text-gray-500 border-gray-300',
-  REPOSTO: 'bg-cyan-100 text-cyan-800 border-cyan-300',
-}
+
 
 // ========== DnD Components ==========
 
@@ -95,7 +96,7 @@ function DroppableCell({
   const { isOver, setNodeRef } = useDroppable({ id })
   return (
     <td
-      ref={setNodeRef as any}
+      ref={setNodeRef as React.Ref<HTMLTableCellElement>}
       className={`${className || ''} ${isOver ? 'bg-blue-50' : ''}`}
     >
       {children}
@@ -114,14 +115,14 @@ function DraggableSessao({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id })
   return (
-    <button
-      ref={setNodeRef as any}
+    <div
+      ref={setNodeRef as React.Ref<HTMLDivElement>}
       {...listeners}
       {...attributes}
       className={`${className || ''} ${isDragging ? 'opacity-30' : ''} cursor-grab active:cursor-grabbing`}
     >
       {children}
-    </button>
+    </div>
   )
 }
 
@@ -129,7 +130,9 @@ export function CalendarioSemanal({
   sessoes,
   horarios,
   bloqueios,
+  ausencias,
   terapeutaFiltro,
+  diasTrabalho,
   semanaAtual,
   onMudarSemana,
   onNovaSessao,
@@ -138,6 +141,7 @@ export function CalendarioSemanal({
   onDesbloquear,
   onMoverSessao,
 }: Props) {
+  const { success, error } = useToast()
   const [celulaSelecionada, setCelulaSelecionada] = useState<{
     data: string
     horaInicio: string
@@ -166,8 +170,9 @@ export function CalendarioSemanal({
 
   const bloqueiosPorCelula = useMemo(() => {
     const map = new Map<string, Bloqueio>()
+    if (!terapeutaFiltro) return map
     for (const b of bloqueios) {
-      if (terapeutaFiltro && b.terapeuta_id !== terapeutaFiltro) continue
+      if (b.terapeuta_id !== terapeutaFiltro) continue
       const key = `${b.data}|${b.hora_inicio.slice(0, 5)}`
       map.set(key, b)
     }
@@ -181,6 +186,27 @@ export function CalendarioSemanal({
   }, [sessoes])
 
   const activeSessao = activeDragId ? sessaoById.get(activeDragId) || null : null
+
+  const diasTrabalhoSet = useMemo(() => {
+    if (!diasTrabalho || diasTrabalho.length === 0) return new Set<string>()
+    return new Set(diasTrabalho.map(normalizarDiaBanco))
+  }, [diasTrabalho])
+
+  function estaBloqueadoLogicamente(dia: string): boolean {
+    if (!terapeutaFiltro) return false
+    if (diasTrabalhoSet.size === 0) return false
+    return !diasTrabalhoSet.has(dia)
+  }
+
+  function buscarAusencia(dataISO: string): Ausencia | undefined {
+    if (!terapeutaFiltro || !ausencias) return undefined
+    return ausencias.find(a => {
+      if (a.terapeuta_id !== terapeutaFiltro) return false
+      const inicio = a.data_inicio
+      const fim = a.data_fim
+      return dataISO >= inicio && dataISO <= fim
+    })
+  }
 
   function handleDragStart(event: DragStartEvent) {
     setActiveDragId(event.active.id as string)
@@ -210,6 +236,13 @@ export function CalendarioSemanal({
     const bloqueio = bloqueiosPorCelula.get(destKey)
     if (bloqueio) {
       // Recusa silenciosa — o pai pode mostrar toast se quiser
+      return
+    }
+
+    // Verifica bloqueio lógico por dias de trabalho
+    const diaSemanaDest = new Date(destData + 'T00:00:00').getDay()
+    const diaIndex = diaSemanaDest === 0 ? 4 : diaSemanaDest - 1
+    if (diaIndex >= 0 && diaIndex < DIAS.length && estaBloqueadoLogicamente(DIAS[diaIndex])) {
       return
     }
 
@@ -245,23 +278,40 @@ export function CalendarioSemanal({
             d.setDate(d.getDate() - 7)
             onMudarSemana(d)
           }}
-          className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-sm normal-case"
+          className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-sm normal-case print-hidden"
         >
           ← SEMANA ANTERIOR
         </button>
         <div className="text-sm font-semibold text-gray-900">
-          {formatDateBR(datasISO[0])} A {formatDateBR(datasISO[4])}
+          {formatDateBRFromISO(datasISO[0])} A {formatDateBRFromISO(datasISO[4])}
         </div>
-        <button
-          onClick={() => {
-            const d = new Date(semanaAtual)
-            d.setDate(d.getDate() + 7)
-            onMudarSemana(d)
-          }}
-          className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-sm normal-case"
-        >
-          PRÓXIMA SEMANA →
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const texto = formatarAgendaWhatsApp(sessoes, `AGENDA DA SEMANA — ${formatDateBRFromISO(datasISO[0])} A ${formatDateBRFromISO(datasISO[4])}`)
+              navigator.clipboard.writeText(texto).then(() => success('AGENDA COPIADA PARA O WHATSAPP')).catch(() => error('ERRO AO COPIAR'))
+            }}
+            className="px-3 py-1.5 rounded-lg border border-green-500 bg-green-50 text-green-700 hover:bg-green-100 font-medium text-sm normal-case print-hidden"
+          >
+            📋 WHATSAPP
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-sm normal-case print-hidden"
+          >
+            🖨️ IMPRIMIR
+          </button>
+          <button
+            onClick={() => {
+              const d = new Date(semanaAtual)
+              d.setDate(d.getDate() + 7)
+              onMudarSemana(d)
+            }}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-sm normal-case print-hidden"
+          >
+            PRÓXIMA SEMANA →
+          </button>
+        </div>
       </div>
 
       {/* Grade */}
@@ -279,7 +329,7 @@ export function CalendarioSemanal({
                   {DIAS.map((dia, i) => (
                     <th key={dia} className="px-3 py-3 text-center font-semibold text-gray-700 min-w-[140px]">
                       <div>{dia}</div>
-                      <div className="text-xs font-normal text-gray-500">{formatDateBR(datasISO[i])}</div>
+                      <div className="text-xs font-normal text-gray-500">{formatDateBRFromISO(datasISO[i])}</div>
                     </th>
                   ))}
                 </tr>
@@ -296,9 +346,19 @@ export function CalendarioSemanal({
                       const key = `${dataISO}|${h.hora_inicio}`
                       const lista = sessoesPorCelula.get(key) || []
                       const bloqueio = bloqueiosPorCelula.get(key)
-                      const qtd = lista.length
-                      const pred = corPredominante(lista)
-                      const cor = STATUS_COR[pred as keyof typeof STATUS_COR] || 'bg-gray-50 text-gray-600 border-gray-200'
+                      const qtd = lista.filter(s => s.tipo === 'SESSAO').length
+                      const listaSessoes = lista.filter(s => s.tipo === 'SESSAO')
+                      const pred = terapeutaFiltro
+                        ? (listaSessoes.map(s => {
+                            const t = (s.terapeutas || []).find(t => t.id === terapeutaFiltro)
+                            return t?.status || s.status
+                          })[0] || '')
+                        : corPredominante(listaSessoes)
+                      const cor = terapeutaFiltro
+                        ? (STATUS_COR[pred as keyof typeof STATUS_COR] || 'bg-gray-50 text-gray-600 border-gray-200')
+                        : (qtd > 0 ? 'bg-white text-gray-800 border-gray-300' : 'bg-gray-50 text-gray-600 border-gray-200')
+                      const ausencia = buscarAusencia(dataISO)
+                      const bloqueadoLogicamente = estaBloqueadoLogicamente(dia)
 
                       if (bloqueio) {
                         return (
@@ -314,6 +374,29 @@ export function CalendarioSemanal({
                         )
                       }
 
+                      if (ausencia) {
+                        return (
+                          <td key={dia} className="px-2 py-2 align-top">
+                            <div
+                              className="w-full rounded-lg border px-2 py-1.5 text-xs font-bold bg-orange-700 text-white border-orange-700 text-center"
+                              title={ausencia.motivo}
+                            >
+                              {ausencia.motivo}
+                            </div>
+                          </td>
+                        )
+                      }
+
+                      if (bloqueadoLogicamente) {
+                        return (
+                          <td key={dia} className="px-2 py-2 align-top">
+                            <div className="w-full rounded-lg border px-2 py-1.5 text-xs font-bold bg-gray-800 text-white border-gray-800 text-center">
+                              BLOQUEADO
+                            </div>
+                          </td>
+                        )
+                      }
+
                       const cellContent = qtd === 0 ? (
                         <div className="relative">
                           <button
@@ -325,7 +408,7 @@ export function CalendarioSemanal({
                           {terapeutaFiltro && (
                             <button
                               onClick={() => onBloquear(dataISO, h.hora_inicio, h.hora_fim)}
-                              className="absolute top-0 right-0 -mt-1 -mr-1 w-5 h-5 rounded-full bg-gray-600 text-white text-[10px] flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                              className="absolute top-0 right-0 -mt-1 -mr-1 w-5 h-5 rounded-full bg-gray-600 text-white text-[10px] flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity print-hidden"
                               title="BLOQUEAR"
                             >
                               ✕
@@ -333,27 +416,32 @@ export function CalendarioSemanal({
                           )}
                         </div>
                       ) : (
-                        <button
-                          onClick={() => {
-                            if (lista.length === 1) {
-                              onEditarSessao(lista[0])
-                            } else {
-                              setCelulaSelecionada({ data: dataISO, horaInicio: h.hora_inicio, horaFim: h.hora_fim, sessoes: lista })
-                            }
-                          }}
-                          className={`w-full rounded-lg border px-2 py-1.5 text-xs transition-colors hover:shadow-sm ${cor} ${lista.length === 1 ? 'text-left' : 'font-bold text-center'}`}
-                        >
-                          {lista.length === 1 ? (
-                            <>
-                              <div className="font-bold truncate">{lista[0].paciente_nome}</div>
-                              <div className="text-[10px] opacity-70 truncate">
-                                {(lista[0].terapeutas || []).map(t => t.nome.split(' ')[0]).join(', ')}
-                              </div>
-                            </>
-                          ) : (
-                            <>{qtd} PAC{qtd > 1 ? 'S' : ''}</>
-                          )}
-                        </button>
+                        <div className="space-y-1">
+                          <button
+                            onClick={() => {
+                              if (lista.length === 1) {
+                                onEditarSessao(lista[0])
+                              } else {
+                                setCelulaSelecionada({ data: dataISO, horaInicio: h.hora_inicio, horaFim: h.hora_fim, sessoes: lista })
+                              }
+                            }}
+                            className={`w-full rounded-lg border px-2 py-1.5 text-xs transition-colors hover:shadow-sm ${cor} ${lista.length === 1 ? 'text-left' : 'font-bold text-center'}`}
+                          >
+                            {lista.length === 1 ? (
+                              <>
+                                <div className="font-bold truncate">
+                                  {lista[0].recorrente ? '↻ ' : ''}
+                                  {lista[0].tipo !== 'SESSAO' ? (lista[0].titulo || lista[0].tipo) : lista[0].paciente_nome}
+                                </div>
+                                <div className="text-[10px] opacity-70 truncate">
+                                  {(lista[0].terapeutas || []).map(t => t.nome.split(' ')[0] + (t.ativo === false ? '*' : '')).join(', ')}
+                                </div>
+                              </>
+                            ) : (
+                              <>{qtd} ATIV{qtd > 1 ? 'S' : ''}</>
+                            )}
+                          </button>
+                        </div>
                       )
 
                       // Se há exatamente 1 sessão, torna draggable
@@ -382,9 +470,12 @@ export function CalendarioSemanal({
         <DragOverlay dropAnimation={null}>
           {activeSessao ? (
             <div className="rounded-lg border px-3 py-2 text-xs shadow-lg bg-white opacity-90 pointer-events-none">
-              <div className="font-bold truncate">{activeSessao.paciente_nome}</div>
+              <div className="font-bold truncate">
+                {activeSessao.recorrente ? '↻ ' : ''}
+                {activeSessao.tipo !== 'SESSAO' ? (activeSessao.titulo || activeSessao.tipo) : activeSessao.paciente_nome}
+              </div>
               <div className="text-[10px] text-gray-500 truncate">
-                {(activeSessao.terapeutas || []).map(t => t.nome.split(' ')[0]).join(', ')}
+                {(activeSessao.terapeutas || []).map(t => t.nome.split(' ')[0] + (t.ativo === false ? '*' : '')).join(', ')}
               </div>
             </div>
           ) : null}
@@ -403,6 +494,14 @@ export function CalendarioSemanal({
           onFechar={() => setCelulaSelecionada(null)}
         />
       )}
+
+      {/* Componente de impressão */}
+      <div className="print-only">
+        <AgendaPrintView
+          titulo={`AGENDA DA SEMANA — ${formatDateBRFromISO(datasISO[0])} A ${formatDateBRFromISO(datasISO[4])}`}
+          sessoes={sessoes}
+        />
+      </div>
 
       {/* Legenda */}
       <div className="flex flex-wrap gap-3 text-xs">
