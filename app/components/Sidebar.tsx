@@ -1,45 +1,70 @@
 'use client'
 
+import { useState } from 'react'
+
 interface Props {
   viewAtiva: string
   onMudarView: (view: string) => void
 }
 
 const items = [
-  { id: 'agenda', label: 'Agenda' },
-  { id: 'recepcao', label: 'Recepção' },
-  { id: 'pacientes', label: 'Pacientes' },
-  { id: 'terapeutas', label: 'Terapeutas' },
-  { id: 'especialidades', label: 'Especialidades' },
-  { id: 'horarios', label: 'Horários' },
-  { id: 'relatorios', label: 'Relatórios' },
+  { id: 'agenda', label: 'Agenda', icon: '📅' },
+  { id: 'recepcao', label: 'Recepção', icon: '🏥' },
+  { id: 'pacientes', label: 'Pacientes', icon: '👤' },
+  { id: 'terapeutas', label: 'Terapeutas', icon: '🩺' },
+  { id: 'especialidades', label: 'Especialidades', icon: '🏷️' },
+  { id: 'horarios', label: 'Horários', icon: '⏰' },
+  { id: 'relatorios', label: 'Relatórios', icon: '📊' },
 ]
 
 export function Sidebar({ viewAtiva, onMudarView }: Props) {
+  const [collapsed, setCollapsed] = useState(false)
+
   return (
-    <aside className="w-64 bg-white border-r flex flex-col h-screen sticky top-0 uppercase">
-      <div className="p-6 border-b">
-        <h2 className="text-xl font-bold text-blue-700">AgendaPro</h2>
-        <p className="text-xs text-gray-500 mt-1">Sistema TEACOLHE</p>
+    <aside
+      className={`bg-white border-r flex flex-col h-screen sticky top-0 transition-all duration-300 ${
+        collapsed ? 'w-16' : 'w-64'
+      }`}
+    >
+      <div className={`border-b flex items-center ${collapsed ? 'p-3 justify-center' : 'p-6'}`}>
+        {!collapsed && (
+          <div className="flex-1">
+            <h2 className="text-xl font-bold text-blue-700">AgendaPro</h2>
+            <p className="text-xs text-gray-500 mt-1">Sistema TEACOLHE</p>
+          </div>
+        )}
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="text-gray-400 hover:text-gray-700 transition-colors p-1 rounded hover:bg-gray-100"
+          title={collapsed ? 'Expandir' : 'Recolher'}
+        >
+          {collapsed ? '→' : '←'}
+        </button>
       </div>
 
-      <nav className="flex-1 p-4 space-y-1">
+      <nav className={`flex-1 space-y-1 ${collapsed ? 'p-2' : 'p-4'}`}>
         {items.map(item => (
           <button
             key={item.id}
             onClick={() => onMudarView(item.id)}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-colors uppercase ${
+            title={item.label}
+            className={`w-full rounded-lg text-sm font-medium transition-colors uppercase flex items-center ${
+              collapsed ? 'justify-center px-2 py-2.5' : 'text-left px-4 py-2.5'
+            } ${
               viewAtiva === item.id
                 ? 'bg-blue-50 text-blue-700'
                 : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
             }`}
           >
-            {item.label}
+            <span className={collapsed ? 'text-lg' : 'mr-3'}>{item.icon}</span>
+            {!collapsed && <span>{item.label}</span>}
           </button>
         ))}
       </nav>
 
-      <div className="p-4 border-t text-xs text-gray-400">v0.2.0</div>
+      <div className={`border-t text-xs text-gray-400 ${collapsed ? 'p-2 text-center' : 'p-4'}`}>
+        {collapsed ? 'v0.2' : 'v0.2.0'}
+      </div>
     </aside>
   )
 }
