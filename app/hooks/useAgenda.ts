@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { listarSessoes, listarBloqueios, listarAusencias, Sessao, Bloqueio, Ausencia } from '../actions'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { agendaSemana, listarBloqueios, listarAusencias, Sessao, Bloqueio, Ausencia } from '../actions'
 import { formatDateISO } from '@/lib/date-helpers'
-
-
+import { useRealtime } from './useRealtime'
 
 function getSemanaFim(segunda: Date): Date {
   const sexta = new Date(segunda)
@@ -12,49 +11,61 @@ function getSemanaFim(segunda: Date): Date {
   return sexta
 }
 
-export function useAgenda(semanaAtual: Date, viewAtiva: string, toastError: (msg: string) => void) {
-  const [sessoes, setSessoes] = useState<Sessao[]>([])
-  const [bloqueios, setBloqueios] = useState<Bloqueio[]>([])
-  const [ausencias, setAusencias] = useState<Ausencia[]>([])
-  const [loading, setLoading] = useState(false)
+export function useAgenda(semanaAtual: Date, viewAtiva: string, _toastError?: (msg: string) => void) {
+  const queryClient = useQueryClient()
+  const inicio = formatDateISO(semanaAtual)
+  const fim = formatDateISO(getSemanaFim(semanaAtual))
 
-  useEffect(() => {
-    if (viewAtiva !== 'agenda') return
-    setLoading(true)
-    let cancelled = false
-    const inicio = formatDateISO(semanaAtual)
-    const fim = formatDateISO(getSemanaFim(semanaAtual))
-    listarSessoes(inicio, fim)
-      .then(data => { if (!cancelled) setSessoes(data) })
-      .catch(err => { if (!cancelled) toastError(err.message) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    listarAusencias()
-      .then(data => { if (!cancelled) setAusencias(data) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [viewAtiva, semanaAtual])
+  const enabled = viewAtiva === 'agenda'
 
-  useEffect(() => {
-    if (viewAtiva !== 'agenda') return
-    let cancelled = false
-    const inicio = formatDateISO(semanaAtual)
-    const fim = formatDateISO(getSemanaFim(semanaAtual))
-    listarBloqueios(inicio, fim)
-      .then(data => { if (!cancelled) setBloqueios(data) })
-      .catch(err => { if (!cancelled) toastError(err.message) })
-    listarAusencias()
-      .then(data => { if (!cancelled) setAusencias(data) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [viewAtiva, semanaAtual])
+  const sessoesQuery = useQuery({
+    queryKey: ['agenda', 'sessoes', inicio, fim],
+    queryFn: () => agendaSemana(inicio, fim),
+    enabled,
+    staleTime: 30_000,
+  })
 
-  const recarregar = async () => {
-    const inicio = formatDateISO(semanaAtual)
-    const fim = formatDateISO(getSemanaFim(semanaAtual))
-    setSessoes(await listarSessoes(inicio, fim))
-    setBloqueios(await listarBloqueios(inicio, fim))
-    setAusencias(await listarAusencias())
+  const bloqueiosQuery = useQuery({
+    queryKey: ['agenda', 'bloqueios', inicio, fim],
+    queryFn: () => listarBloqueios(inicio, fim),
+    enabled,
+    staleTime: 30_000,
+  })
+
+  const ausenciasQuery = useQuery({
+    queryKey: ['agenda', 'ausencias'],
+    queryFn: () => listarAusencias(),
+    enabled,
+    staleTime: 60_000,
+  })
+
+  const loading = sessoesQuery.isLoading || bloqueiosQuery.isLoading || ausenciasQuery.isLoading
+
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: ['agenda', 'sessoes', inicio, fim] })
+    queryClient.invalidateQueries({ queryKey: ['agenda', 'bloqueios', inicio, fim] })
+    queryClient.invalidateQueries({ queryKey: ['agenda', 'ausencias'] })
+    queryClient.invalidateQueries({ queryKey: ['recepcao'] })
   }
 
-  return { sessoes, bloqueios, ausencias, loading, recarregar }
+  useRealtime({ table: 'sessoes', onChange: invalidateAll })
+  useRealtime({ table: 'sessao_terapeutas', onChange: invalidateAll })
+  useRealtime({ table: 'bloqueios', onChange: invalidateAll })
+  useRealtime({ table: 'ausencias', onChange: invalidateAll })
+
+  const recarregar = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['agenda', 'sessoes', inicio, fim] }),
+      queryClient.invalidateQueries({ queryKey: ['agenda', 'bloqueios', inicio, fim] }),
+      queryClient.invalidateQueries({ queryKey: ['agenda', 'ausencias'] }),
+    ])
+  }
+
+  return {
+    sessoes: sessoesQuery.data ?? [],
+    bloqueios: bloqueiosQuery.data ?? [],
+    ausencias: ausenciasQuery.data ?? [],
+    loading,
+    recarregar,
+  }
 }

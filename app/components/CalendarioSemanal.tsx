@@ -16,9 +16,9 @@ import {
 import { Sessao, Horario, Bloqueio, Ausencia } from '../actions'
 import { ListaSessoesCelula } from './ListaSessoesCelula'
 import { formatDateISO, formatDateBRFromISO, formatarAgendaWhatsApp } from '@/lib/date-helpers'
+import { exportarExcel } from '@/lib/export-utils'
 import { STATUS_COR } from '@/lib/status-helpers'
 import { useToast } from '../hooks/useToast'
-import { AgendaPrintView } from './AgendaPrintView'
 
 const DIAS = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA']
 
@@ -296,10 +296,87 @@ export function CalendarioSemanal({
             📋 WHATSAPP
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={() => {
+              const lista = terapeutaFiltro
+                ? sessoes.filter(s => (s.terapeutas || []).some(t => t.id === terapeutaFiltro))
+                : sessoes
+
+              if (lista.length === 0) {
+                alert('Nenhuma sessão para imprimir.')
+                return
+              }
+
+              const DIAS_SEMANA = ['DOMINGO', 'SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO']
+
+              const ordenadas = [...lista].sort((a, b) => {
+                const da = a.data + '|' + a.hora_inicio
+                const db = b.data + '|' + b.hora_inicio
+                return da.localeCompare(db)
+              })
+
+              const linhas = ordenadas.map(s => {
+                const d = new Date(s.data + 'T00:00:00')
+                const diaSemana = DIAS_SEMANA[d.getDay()]
+                const dataFmt = formatDateBRFromISO(s.data)
+                const nome = s.tipo === 'VAZIO'
+                  ? '<span style="color:#999;font-style:italic;">— HORÁRIO VAGO —</span>'
+                  : (s.tipo !== 'SESSAO' ? (s.titulo || s.tipo) : (s.paciente_nome || 'Sem nome'))
+                const terapeutas = (s.terapeutas || []).map(t => t.nome).join(', ')
+                return '<tr>' +
+                  '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;"><strong>' + diaSemana + '</strong><br><span style="font-size:8px;color:#666;">' + dataFmt + '</span></td>' +
+                  '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;">' + s.hora_inicio.slice(0, 5) + ' — ' + s.hora_fim.slice(0, 5) + '</td>' +
+                  '<td style="padding:4px 6px;border-bottom:1px solid #ccc;">' + nome + (s.recorrente ? ' ↻' : '') + '</td>' +
+                  '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-family:monospace;font-size:8px;">' + (s.tipo === 'SESSAO' ? (s.paciente_codigo || '-') : '') + '</td>' +
+                  '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-size:8px;">' + terapeutas + '</td>' +
+                  '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;">' + (s.paciente_em_avaliacao ? 'EM AVALIAÇÃO' : s.status.replace(/_/g, ' ')) + '</td>' +
+                  '</tr>'
+              }).join('')
+
+              const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>AGENDA DA SEMANA</title>' +
+                '<style>' +
+                '@page { margin: 8mm; }' +
+                'body { font-family: Arial, sans-serif; font-size: 9px; line-height: 1.3; margin: 0; padding: 16px; background: white; color: black; }' +
+                'h1 { font-size: 14px; font-weight: bold; text-align: center; margin-bottom: 12px; text-transform: uppercase; }' +
+                'table { width: 100%; border-collapse: collapse; }' +
+                'th { text-align: left; padding: 4px 6px; border-bottom: 2px solid black; font-size: 9px; text-transform: uppercase; }' +
+                'td { vertical-align: top; }' +
+                'tr { page-break-inside: avoid; }' +
+                '.footer { margin-top: 24px; font-size: 8px; color: #666; text-align: center; }' +
+                '</style></head><body>' +
+                '<h1>AGENDA DA SEMANA — ' + formatDateBRFromISO(datasISO[0]) + ' A ' + formatDateBRFromISO(datasISO[4]) + '</h1>' +
+                '<table><thead><tr><th>DIA</th><th>HORÁRIO</th><th>PACIENTE</th><th>PRONTUÁRIO</th><th>TERAPEUTAS</th><th>STATUS</th></tr></thead>' +
+                '<tbody>' + linhas + '</tbody></table>' +
+                '<div class="footer">AGENDAPRO — TEACOLHE</div>' +
+                '<script>window.onload = function() { window.print(); }; window.onafterprint = function() { window.close(); };</script>' +
+                '</body></html>'
+
+              const win = window.open('', '_blank')
+              if (win) {
+                win.document.write(html)
+                win.document.close()
+              }
+            }}
             className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-sm normal-case print-hidden"
           >
             🖨️ IMPRIMIR
+          </button>
+          <button
+            onClick={() => {
+              const lista = (terapeutaFiltro ? sessoes.filter(s => (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : sessoes)
+                .sort((a, b) => (a.data + '|' + a.hora_inicio).localeCompare(b.data + '|' + b.hora_inicio))
+              const colunas = [
+                { key: 'data' as const, header: 'DATA' },
+                { key: 'hora_inicio' as const, header: 'INÍCIO' },
+                { key: 'hora_fim' as const, header: 'FIM' },
+                { key: 'paciente_nome' as const, header: 'PACIENTE' },
+                { key: 'paciente_codigo' as const, header: 'PRONTUÁRIO' },
+                { key: 'status' as const, header: 'STATUS' },
+              ]
+              exportarExcel(lista, colunas, `AGENDA_${formatDateISO(semanaAtual)}`)
+            }}
+            className="px-3 py-1.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-sm normal-case print-hidden"
+          >
+            📊 EXCEL
           </button>
           <button
             onClick={() => {
@@ -494,14 +571,6 @@ export function CalendarioSemanal({
           onFechar={() => setCelulaSelecionada(null)}
         />
       )}
-
-      {/* Componente de impressão */}
-      <div className="print-only">
-        <AgendaPrintView
-          titulo={`AGENDA DA SEMANA — ${formatDateBRFromISO(datasISO[0])} A ${formatDateBRFromISO(datasISO[4])}`}
-          sessoes={sessoes}
-        />
-      </div>
 
       {/* Legenda */}
       <div className="flex flex-wrap gap-3 text-xs">

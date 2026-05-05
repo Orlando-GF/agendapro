@@ -1,20 +1,26 @@
 'use client'
 
 import { useMemo, useState, useRef, useEffect } from 'react'
-import { Sessao, Terapeuta, Ausencia } from '../actions'
+import { Sessao, Terapeuta, Ausencia, Horario, Bloqueio } from '../actions'
 import { formatDateBR, formatDateISO, formatarAgendaWhatsApp } from '@/lib/date-helpers'
+import { exportarExcel, exportarPDF } from '@/lib/export-utils'
 import { useToast } from '../hooks/useToast'
-import { STATUS_CONFIG } from '@/lib/status-helpers'
+import { STATUS_CONFIG, STATUS_TERAPETA_CONFIG, extrairMotivoAusencia } from '@/lib/status-helpers'
 
 interface Props {
   sessoes: Sessao[]
   terapeutas: Terapeuta[]
+  horarios: Horario[]
   ausencias?: Ausencia[]
+  bloqueios?: Bloqueio[]
+  horariosPadrao?: Map<string, Set<string>>
   dataAtual: Date
   terapeutaFiltro?: string
   onMudarData: (d: Date) => void
   onMudarStatus: (id: string, status: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
+  onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => Promise<void>
+  onMarcarAusenciaProfissionalDia?: (terapeutaId: string, data: string, motivo: string) => Promise<number>
   onCancelarDia?: (data: string, motivo: string) => Promise<void>
 }
 
@@ -26,23 +32,22 @@ const ACOES = [
   { status: 'CANCELADO', label: 'CANCELAR' },
 ]
 
-const STATUS_TERAPETA_CONFIG: Record<string, { label: string; cor: string }> = {
-  AGENDADO: { label: 'AGENDADO', cor: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-  PRESENTE: { label: 'PRESENTE', cor: 'bg-green-100 text-green-700 border-green-200' },
-  FALTA_PROFISSIONAL: { label: 'FP', cor: 'bg-pink-100 text-pink-700 border-pink-200' },
-  ATESTADO_PROFISSIONAL: { label: 'AP', cor: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
-}
+
 
 function MenuTerapeutaStatus({
   sessaoId,
   terapeuta,
   onMudarStatus,
+  onMarcarAusencia,
 }: {
   sessaoId: string
-  terapeuta: { id: string; nome: string; status?: string | null; ativo?: boolean | null }
+  terapeuta: { id: string; nome: string; status?: string | null; ativo?: boolean | null; observacoes?: string | null }
   onMudarStatus?: (sessaoId: string, terapeutaId: string, status: string) => void
+  onMarcarAusencia?: (motivo: string) => void
 }) {
   const [aberto, setAberto] = useState(false)
+  const [modalMotivo, setModalMotivo] = useState(false)
+  const [motivo, setMotivo] = useState('')
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
 
@@ -62,12 +67,7 @@ function MenuTerapeutaStatus({
   }, [aberto, sessaoId, terapeuta.id])
 
   const statusAtual = terapeuta.status || 'AGENDADO'
-
-  const opcoes = [
-    { status: 'FALTA_PROFISSIONAL', label: 'Falta Profissional', cor: 'text-pink-700 hover:bg-pink-50' },
-    { status: 'ATESTADO_PROFISSIONAL', label: 'Atestado Profissional', cor: 'text-indigo-700 hover:bg-indigo-50' },
-    { status: 'AGENDADO', label: 'Resetar para Agendado', cor: 'text-gray-700 hover:bg-gray-50' },
-  ]
+  const temAusencia = statusAtual === 'FALTA_PROFISSIONAL' || statusAtual === 'ATESTADO_PROFISSIONAL'
 
   const handleBtnClick = () => {
     if (!aberto && btnRef.current) {
@@ -77,6 +77,15 @@ function MenuTerapeutaStatus({
     setAberto(!aberto)
   }
 
+  const handleConfirmarAusencia = () => {
+    if (onMarcarAusencia && motivo.trim()) {
+      onMarcarAusencia(motivo.trim())
+    }
+    setModalMotivo(false)
+    setMotivo('')
+    setAberto(false)
+  }
+
   return (
     <>
       <button
@@ -84,7 +93,7 @@ function MenuTerapeutaStatus({
         onClick={handleBtnClick}
         className="ml-1 text-sm text-gray-500 hover:text-gray-800 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer disabled:cursor-default disabled:text-gray-300"
         title="Ações do terapeuta"
-        disabled={!onMudarStatus}
+        disabled={!onMudarStatus && !onMarcarAusencia}
       >
         ⋮
       </button>
@@ -97,50 +106,116 @@ function MenuTerapeutaStatus({
           <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b mb-1">
             {terapeuta.nome}
           </div>
-          {opcoes.map(op => (
+
+          {/* Ação: Registrar Ausência (abre modal) */}
+          {onMarcarAusencia && (
             <button
-              key={op.status}
               onClick={() => {
-                if (onMudarStatus) {
-                  onMudarStatus(sessaoId, terapeuta.id, op.status)
-                }
+                setModalMotivo(true)
+              }}
+              className="w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors text-teal-700 hover:bg-teal-50"
+            >
+              {temAusencia ? 'Alterar Ausência' : 'Registrar Ausência'}
+            </button>
+          )}
+
+          {/* Ação: Resetar para Agendado */}
+          {onMudarStatus && (
+            <button
+              onClick={() => {
+                onMudarStatus(sessaoId, terapeuta.id, 'AGENDADO')
                 setAberto(false)
               }}
-              disabled={statusAtual === op.status}
-              className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors ${op.cor} ${
-                statusAtual === op.status ? 'opacity-40 cursor-default' : ''
+              disabled={statusAtual === 'AGENDADO'}
+              className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors text-gray-700 hover:bg-gray-50 ${
+                statusAtual === 'AGENDADO' ? 'opacity-40 cursor-default' : ''
               }`}
             >
-              {op.label}
-              {statusAtual === op.status && ' ✓'}
+              Resetar para Agendado
+              {statusAtual === 'AGENDADO' && ' ✓'}
             </button>
-          ))}
+          )}
+        </div>
+      )}
+
+      {/* Modal de motivo da ausência */}
+      {modalMotivo && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000]">
+          <div className="bg-white rounded-lg border p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900">
+              {temAusencia ? 'Alterar Motivo da Ausência' : 'Registrar Ausência'}
+            </h3>
+            <p className="text-sm text-gray-600">
+              {temAusencia
+                ? `Altere o motivo da ausência de ${terapeuta.nome}.`
+                : `Informe o motivo da ausência de ${terapeuta.nome}.`}
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">MOTIVO</label>
+              <select
+                value={motivo}
+                onChange={e => setMotivo(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">Selecione...</option>
+                <option value="Folga">Folga</option>
+                <option value="Férias">Férias</option>
+                <option value="Licença Médica">Licença Médica</option>
+                <option value="Atestado">Atestado</option>
+                <option value="Outro">Outro</option>
+              </select>
+            </div>
+            {motivo === 'Outro' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ESPECIFIQUE</label>
+                <input
+                  type="text"
+                  value={motivo === 'Outro' ? '' : motivo}
+                  onChange={e => setMotivo(e.target.value)}
+                  placeholder="Ex: compromisso pessoal..."
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => { setModalMotivo(false); setMotivo('') }}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium normal-case"
+              >
+                CANCELAR
+              </button>
+              <button
+                onClick={handleConfirmarAusencia}
+                disabled={!motivo.trim()}
+                className="px-4 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 font-medium disabled:opacity-50 normal-case"
+              >
+                CONFIRMAR
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>
   )
 }
 
+const DIAS_SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado']
+
 function LinhaSessao({
   s,
-  ausencias,
+  terapeutasHoje,
   onMudarStatus,
   onMudarStatusTerapeuta,
+  onMarcarAusenciaProfissional,
 }: {
   s: Sessao
-  ausencias?: Ausencia[]
+  terapeutasHoje: Terapeuta[]
   onMudarStatus: (id: string, status: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
+  onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => void
 }) {
   const cfg = STATUS_CONFIG[s.status] || STATUS_CONFIG.AGENDADO
-
-  function buscarAusencia(terapeutaId: string): Ausencia | undefined {
-    if (!ausencias) return undefined
-    return ausencias.find(a => {
-      if (a.terapeuta_id !== terapeutaId) return false
-      return s.data >= a.data_inicio && s.data <= a.data_fim
-    })
-  }
+  const emAvaliacao = s.paciente_em_avaliacao === true
 
   return (
     <tr className="hover:bg-gray-50 group">
@@ -148,7 +223,9 @@ function LinhaSessao({
         {s.hora_inicio.slice(0, 5)} - {s.hora_fim.slice(0, 5)}
       </td>
       <td className="px-4 py-3 font-medium text-gray-900">
-        {s.tipo !== 'SESSAO' ? (
+        {s.tipo === 'VAZIO' ? (
+          <span className="text-gray-400 italic text-sm">— HORÁRIO VAGO —</span>
+        ) : s.tipo !== 'SESSAO' ? (
           <div>
             <div className="font-bold">{s.recorrente ? '↻ ' : ''}{s.titulo || s.tipo}</div>
             <div className="text-[10px] text-gray-500">{s.tipo}</div>
@@ -156,6 +233,11 @@ function LinhaSessao({
         ) : (
           <div>
             <div className="font-bold">{s.recorrente ? '↻ ' : ''}{s.paciente_nome}</div>
+            {emAvaliacao && (
+              <span className="inline-block mt-0.5 px-1.5 py-0 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                EM AVALIAÇÃO
+              </span>
+            )}
           </div>
         )}
       </td>
@@ -163,53 +245,64 @@ function LinhaSessao({
         {s.tipo === 'SESSAO' ? (s.paciente_codigo || '-') : ''}
       </td>
       <td className="px-4 py-3 text-gray-600">
-        <div className="flex flex-col gap-0.5">
-          {(s.terapeutas || []).map(t => {
-            const stCfg = STATUS_TERAPETA_CONFIG[t.status || 'AGENDADO']
-            const ausencia = buscarAusencia(t.id)
-            return (
-              <div key={t.id} className="flex items-center">
-                <span className={`text-xs ${t.ativo === false ? 'text-red-500 line-through' : 'text-gray-700'}`}>
-                  {t.nome}{t.ativo === false ? ' (inativo)' : ''}
-                </span>
-                {ausencia && (
-                  <span className="ml-1 inline-block px-1 py-0 rounded text-[9px] font-medium bg-orange-100 text-orange-700 border border-orange-200">
-                    {ausencia.motivo}
+        {s.tipo === 'VAZIO' ? (
+          <div className="flex flex-col gap-0.5">
+            {terapeutasHoje.map(t => (
+              <span key={t.id} className="text-xs text-gray-500 italic">
+                {t.nome}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-0.5">
+            {(s.terapeutas || []).map(t => {
+              const stCfg = STATUS_TERAPETA_CONFIG[t.status || 'AGENDADO']
+              const temExcecao = t.status && t.status !== 'AGENDADO' && t.status !== 'PRESENTE'
+              const motivo = extrairMotivoAusencia(t.observacoes)
+              return (
+                <div key={t.id} className="flex items-center">
+                  <span className={`text-xs ${t.ativo === false ? 'text-red-500 line-through' : 'text-gray-700'}`}>
+                    {t.nome}{t.ativo === false ? ' (inativo)' : ''}
                   </span>
-                )}
-                {t.ativo !== false && stCfg && t.status && t.status !== 'AGENDADO' && (
-                  <span className={`ml-1 inline-block px-1 py-0 rounded text-[9px] font-medium border ${stCfg.cor}`}>
-                    {stCfg.label}
-                  </span>
-                )}
-                <MenuTerapeutaStatus sessaoId={s.id} terapeuta={t} onMudarStatus={onMudarStatusTerapeuta} />
-              </div>
-            )
-          })}
-        </div>
+                  {temExcecao && stCfg && (
+                    <span className={`ml-1 inline-block px-1.5 py-0 rounded text-[9px] font-medium border ${stCfg.cor}`}>
+                      {motivo || stCfg.label}
+                    </span>
+                  )}
+                  <MenuTerapeutaStatus sessaoId={s.id} terapeuta={t} onMudarStatus={onMudarStatusTerapeuta} onMarcarAusencia={onMarcarAusenciaProfissional ? (motivo) => onMarcarAusenciaProfissional(s.id, t.id, motivo) : undefined} />
+                </div>
+              )
+            })}
+          </div>
+        )}
       </td>
       <td className="px-4 py-3 text-center">
-        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
-          {s.status.replace(/_/g, ' ')}
-        </span>
+        {s.tipo === 'VAZIO' ? null : (
+          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
+            {s.status.replace(/_/g, ' ')}
+          </span>
+        )}
       </td>
       <td className="px-4 py-3">
-        <div className="flex justify-center gap-1 flex-wrap print-hidden">
-          {ACOES.map(a => (
-            <button
-              key={a.status}
-              onClick={() => onMudarStatus(s.id, a.status)}
-              disabled={s.status === a.status}
-              className={`px-2 py-1 text-[10px] rounded border font-medium normal-case transition-colors ${
-                s.status === a.status
-                  ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-              }`}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
+        {s.tipo === 'VAZIO' ? null : (
+          <div className="flex justify-center gap-1 flex-wrap print-hidden">
+            {ACOES.map(a => (
+              <button
+                key={a.status}
+                onClick={() => onMudarStatus(s.id, a.status)}
+                disabled={s.status === a.status || emAvaliacao}
+                title={emAvaliacao ? 'Paciente em avaliação' : undefined}
+                className={`px-2 py-1 text-[10px] rounded border font-medium normal-case transition-colors ${
+                  s.status === a.status || emAvaliacao
+                    ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default opacity-60'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
       </td>
     </tr>
   )
@@ -217,14 +310,16 @@ function LinhaSessao({
 
 function TabelaSessoes({
   sessoes,
-  ausencias,
+  terapeutasHoje,
   onMudarStatus,
   onMudarStatusTerapeuta,
+  onMarcarAusenciaProfissional,
 }: {
   sessoes: Sessao[]
-  ausencias?: Ausencia[]
+  terapeutasHoje: Terapeuta[]
   onMudarStatus: (id: string, status: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
+  onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => void
 }) {
   return (
     <div className="bg-white rounded-lg border overflow-hidden">
@@ -242,7 +337,7 @@ function TabelaSessoes({
           </thead>
           <tbody className="divide-y">
             {sessoes.map(s => (
-              <LinhaSessao key={s.id} s={s} ausencias={ausencias} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} />
+              <LinhaSessao key={s.id} s={s} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} />
             ))}
           </tbody>
         </table>
@@ -254,14 +349,51 @@ function TabelaSessoes({
 export function RecepcaoView({
   sessoes,
   terapeutas,
+  horarios,
   ausencias,
+  bloqueios,
+  horariosPadrao,
   dataAtual,
   terapeutaFiltro,
   onMudarData,
   onMudarStatus,
   onMudarStatusTerapeuta,
+  onMarcarAusenciaProfissional,
+  onMarcarAusenciaProfissionalDia,
   onCancelarDia,
 }: Props) {
+  const dataISO = formatDateISO(dataAtual)
+  const diaSemanaHoje = DIAS_SEMANA[dataAtual.getDay()]
+
+  // Verifica se um terapeuta está disponível em um horário específico
+  const terapeutaDisponivel = (terapeutaId: string, horaInicio: string, horaFim: string): boolean => {
+    const t = terapeutas.find(tt => tt.id === terapeutaId)
+    if (!t) return false
+    if (t.ativo === false) return false
+    if (t.dias_trabalho && !t.dias_trabalho.includes(diaSemanaHoje)) return false
+
+    // Verifica ausência
+    if (ausencias) {
+      const ausente = ausencias.find(a => a.terapeuta_id === terapeutaId && dataISO >= a.data_inicio && dataISO <= a.data_fim)
+      if (ausente) return false
+    }
+
+    // Verifica bloqueio manual (sobreposição de horário)
+    if (bloqueios) {
+      const bloqueado = bloqueios.find(b => {
+        if (b.terapeuta_id !== terapeutaId) return false
+        // Verifica sobreposição de horários
+        const bi = b.hora_inicio.slice(0, 5)
+        const bf = b.hora_fim.slice(0, 5)
+        const hi = horaInicio.slice(0, 5)
+        const hf = horaFim.slice(0, 5)
+        return bi < hf && bf > hi
+      })
+      if (bloqueado) return false
+    }
+
+    return true
+  }
   const { success, error } = useToast()
   const [modo, setModo] = useState<'horario' | 'terapeuta'>('horario')
   const [modalDiaNaoFuncionou, setModalDiaNaoFuncionou] = useState(false)
@@ -280,6 +412,39 @@ export function RecepcaoView({
     const cancelado = sessoesOnly.filter(s => s.status === 'CANCELADO').length
     return { total, presente, falta, faltaJustificada, atestado, cancelado }
   }, [sessoesOnly])
+
+  const itensPorHorario = useMemo(() => {
+    const map = new Map<string, Sessao>()
+    // Preenche com horários vazios
+    for (const h of horarios) {
+      const key = `${h.hora_inicio}|${h.hora_fim}`
+      map.set(key, {
+        id: `VAZIO-${h.hora_inicio}`,
+        tipo: 'VAZIO',
+        hora_inicio: h.hora_inicio,
+        hora_fim: h.hora_fim,
+        data: '',
+        status: '',
+        paciente_nome: '',
+        paciente_codigo: '',
+        terapeutas: [],
+      })
+    }
+    // Substitui por sessões existentes ou adiciona sessões com horário avulso
+    for (const s of sessoes) {
+      const key = `${s.hora_inicio}|${s.hora_fim}`
+      if (map.has(key)) {
+        map.set(key, s)
+      } else {
+        map.set(s.id, s)
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
+  }, [sessoes, horarios])
+
+  const terapeutasHoje = useMemo(() => {
+    return terapeutas.filter(t => t.ativo !== false && (t.dias_trabalho || []).includes(diaSemanaHoje))
+  }, [terapeutas, diaSemanaHoje])
 
   const sessoesPorEquipe = useMemo(() => {
     const map = new Map<string, { nomes: string; temInativo: boolean; sessoes: Sessao[] }>()
@@ -303,6 +468,56 @@ export function RecepcaoView({
     return map
   }, [sessoes])
 
+  const sessoesPorEquipeCompletas = useMemo(() => {
+    const map = new Map<string, { nomes: string; temInativo: boolean; sessoes: Sessao[] }>()
+    for (const [chave, grupo] of sessoesPorEquipe.entries()) {
+      // Extrai IDs dos terapeutas deste grupo a partir das sessões
+      const terapeutaIdsDoGrupo = new Set<string>()
+      for (const s of grupo.sessoes) {
+        for (const t of s.terapeutas || []) {
+          terapeutaIdsDoGrupo.add(t.id)
+        }
+      }
+
+      const sessoesPorHorario = new Map<string, Sessao>()
+      for (const s of grupo.sessoes) {
+        const key = `${s.hora_inicio.slice(0, 5)}|${s.hora_fim.slice(0, 5)}`
+        sessoesPorHorario.set(key, s)
+      }
+
+      const mesclada: Sessao[] = []
+      for (const h of horarios) {
+        const key = `${h.hora_inicio.slice(0, 5)}|${h.hora_fim.slice(0, 5)}`
+        const existente = sessoesPorHorario.get(key)
+        if (existente) {
+          mesclada.push(existente)
+        } else {
+          // Só adiciona VAZIO se pelo menos um terapeuta do grupo está disponível
+          const algumDisponivel = Array.from(terapeutaIdsDoGrupo).some(
+            tid => terapeutaDisponivel(tid, h.hora_inicio, h.hora_fim)
+          )
+          if (algumDisponivel) {
+            mesclada.push({
+              id: `VAZIO-${chave}-${key}`,
+              tipo: 'VAZIO',
+              hora_inicio: h.hora_inicio,
+              hora_fim: h.hora_fim,
+              data: '',
+              status: '',
+              paciente_nome: '',
+              paciente_codigo: '',
+              terapeutas: [],
+            } as Sessao)
+          }
+        }
+      }
+
+      mesclada.sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
+      map.set(chave, { ...grupo, sessoes: mesclada })
+    }
+    return map
+  }, [sessoesPorEquipe, horarios, terapeutaDisponivel])
+
   const irParaDiaAnterior = () => {
     const d = new Date(dataAtual)
     d.setDate(d.getDate() - 1)
@@ -316,8 +531,7 @@ export function RecepcaoView({
   }
 
   const imprimirRelatorio = () => {
-    const lista = (terapeutaFiltro ? sessoes.filter(s => (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : sessoes)
-      .slice().sort((a, b) => (a.paciente_codigo || '').localeCompare(b.paciente_codigo || ''))
+    const lista = (terapeutaFiltro ? itensPorHorario.filter(s => s.tipo !== 'VAZIO' && (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : itensPorHorario)
 
     if (lista.length === 0) {
       alert('Nenhuma sessão para imprimir.')
@@ -331,7 +545,7 @@ export function RecepcaoView({
       const diaSemana = DIAS_SEMANA[d.getDay()]
       const [ano, mes, dia] = s.data.split('-')
       const dataFmt = `${dia}/${mes}/${ano}`
-      const nome = s.tipo !== 'SESSAO' ? (s.titulo || s.tipo) : (s.paciente_nome || 'Sem nome')
+      const nome = s.tipo === 'VAZIO' ? '<span style="color:#999;font-style:italic;">— HORÁRIO VAGO —</span>' : (s.tipo !== 'SESSAO' ? (s.titulo || s.tipo) : (s.paciente_nome || 'Sem nome'))
       const terapeutas = (s.terapeutas || []).map(t => t.nome).join(', ')
       return '<tr>' +
         '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;"><strong>' + diaSemana + '</strong><br><span style="font-size:8px;color:#666;">' + dataFmt + '</span></td>' +
@@ -339,7 +553,7 @@ export function RecepcaoView({
         '<td style="padding:4px 6px;border-bottom:1px solid #ccc;">' + nome + (s.recorrente ? ' ↻' : '') + '</td>' +
         '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-family:monospace;font-size:8px;">' + (s.tipo === 'SESSAO' ? (s.paciente_codigo || '-') : '') + '</td>' +
         '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-size:8px;">' + terapeutas + '</td>' +
-        '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;">' + s.status.replace(/_/g, ' ') + '</td>' +
+        '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;">' + (s.tipo === 'VAZIO' ? '' : (s.paciente_em_avaliacao ? 'EM AVALIAÇÃO' : s.status.replace(/_/g, ' '))) + '</td>' +
         '</tr>'
     }).join('')
 
@@ -403,9 +617,8 @@ export function RecepcaoView({
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                const lista = (terapeutaFiltro ? sessoes.filter(s => (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : sessoes)
-                  .slice().sort((a, b) => (a.paciente_codigo || '').localeCompare(b.paciente_codigo || ''))
-                const texto = formatarAgendaWhatsApp(lista, `AGENDA DO DIA — ${formatDateBR(dataAtual)}`)
+                const lista = (terapeutaFiltro ? itensPorHorario.filter(s => s.tipo !== 'VAZIO' && (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : itensPorHorario)
+                const texto = formatarAgendaWhatsApp(lista, `AGENDA DO DIA — ${formatDateBR(dataAtual)}`, horarios)
                 navigator.clipboard.writeText(texto).then(() => success('AGENDA COPIADA PARA O WHATSAPP')).catch(() => error('ERRO AO COPIAR'))
               }}
               className="px-3 py-1.5 rounded-lg border border-green-500 bg-green-50 text-green-700 hover:bg-green-100 font-medium text-sm normal-case"
@@ -417,6 +630,21 @@ export function RecepcaoView({
               className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-sm normal-case"
             >
               🖨️ IMPRIMIR
+            </button>
+            <button
+              onClick={() => {
+                const lista = terapeutaFiltro ? itensPorHorario.filter(s => s.tipo !== 'VAZIO' && (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : itensPorHorario.filter(s => s.tipo !== 'VAZIO')
+                const colunas = [
+                  { key: 'hora_inicio' as const, header: 'HORÁRIO' },
+                  { key: 'paciente_nome' as const, header: 'PACIENTE' },
+                  { key: 'paciente_codigo' as const, header: 'PRONTUÁRIO' },
+                  { key: 'status' as const, header: 'STATUS' },
+                ]
+                exportarExcel(lista, colunas, `RECEPCAO_${formatDateISO(dataAtual)}`)
+              }}
+              className="px-3 py-1.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-sm normal-case"
+            >
+              📊 EXCEL
             </button>
             <button
               onClick={irParaProximoDia}
@@ -528,45 +756,49 @@ export function RecepcaoView({
               </div>
             </div>
 
-            <TabelaSessoes sessoes={sessoes} ausencias={ausencias} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} />
+            <TabelaSessoes sessoes={sessoes} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} />
           </>
         ) : (
           <>
             {/* Visão por terapeuta */}
-            {Array.from(sessoesPorEquipe.values())
+            {Array.from(sessoesPorEquipeCompletas.values())
               .map(grupo => {
                 const lista = grupo.sessoes
                 const dataISO = formatDateISO(dataAtual)
 
-                // Usa os terapeutas da primeira sessão do grupo (todas têm os mesmos)
-                const terapeutasDoGrupo = lista[0]?.terapeutas || []
+                // Usa os terapeutas da primeira sessão REAL do grupo
+                const terapeutasDoGrupo = lista.find(s => s.tipo === 'SESSAO')?.terapeutas || []
 
                 return (
                   <div key={grupo.nomes} className="bg-white rounded-lg border overflow-hidden">
                     <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {terapeutasDoGrupo.map((t, idx) => {
-                          const ausencia = ausencias?.find(a => a.terapeuta_id === t.id && dataISO >= a.data_inicio && dataISO <= a.data_fim)
                           const stCfg = STATUS_TERAPETA_CONFIG[t.status || 'AGENDADO']
                           const inativo = t.ativo === false
+                          const temExcecao = t.status && t.status !== 'AGENDADO' && t.status !== 'PRESENTE'
+                          const motivo = extrairMotivoAusencia(t.observacoes)
                           return (
-                            <span key={t.id} className="flex items-center gap-1">
+                            <span key={t.id} className="flex items-center gap-1 group">
                               <span className={`font-semibold ${inativo ? 'text-red-600 line-through' : 'text-gray-900'}`}>
                                 {t.nome}
                               </span>
                               {inativo && (
                                 <span className="px-1 py-0 rounded text-[9px] font-medium bg-red-100 text-red-700 border border-red-200">INATIVO</span>
                               )}
-                              {ausencia && (
-                                <span className="px-1 py-0 rounded text-[9px] font-medium bg-orange-100 text-orange-700 border border-orange-200">
-                                  {ausencia.motivo}
+                              {temExcecao && stCfg && (
+                                <span className={`px-1.5 py-0 rounded text-[9px] font-medium border ${stCfg.cor}`}>
+                                  {motivo || stCfg.label}
                                 </span>
                               )}
-                              {!inativo && stCfg && t.status && t.status !== 'AGENDADO' && (
-                                <span className={`px-1 py-0 rounded text-[9px] font-medium border ${stCfg.cor}`}>
-                                  {stCfg.label}
-                                </span>
-                              )}
+                              <MenuTerapeutaStatus
+                                sessaoId={lista.find(s => s.tipo === 'SESSAO')?.id || lista[0]?.id || ''}
+                                terapeuta={t}
+                                onMudarStatus={onMudarStatusTerapeuta}
+                                onMarcarAusencia={onMarcarAusenciaProfissionalDia ? (motivo) => {
+                                  onMarcarAusenciaProfissionalDia(t.id, dataISO, motivo).catch(() => {})
+                                } : undefined}
+                              />
                               {idx < terapeutasDoGrupo.length - 1 && (
                                 <span className="text-gray-400 font-medium mx-0.5">+</span>
                               )}
@@ -590,6 +822,7 @@ export function RecepcaoView({
                         <tbody className="divide-y">
                           {lista.map(s => {
                             const cfg = STATUS_CONFIG[s.status] || STATUS_CONFIG.AGENDADO
+                            const emAvaliacao = s.paciente_em_avaliacao === true
                             return (
                               <tr key={s.id} className="hover:bg-gray-50 group">
                                 <td className="px-4 py-3 text-gray-700 font-medium whitespace-nowrap">
@@ -604,6 +837,11 @@ export function RecepcaoView({
                                   ) : (
                                     <div>
                                       <div className="font-bold">{s.recorrente ? '↻ ' : ''}{s.paciente_nome}</div>
+                                      {emAvaliacao && (
+                                        <span className="inline-block mt-0.5 px-1.5 py-0 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                          EM AVALIAÇÃO
+                                        </span>
+                                      )}
                                     </div>
                                   )}
                                 </td>
@@ -621,10 +859,11 @@ export function RecepcaoView({
                                       <button
                                         key={a.status}
                                         onClick={() => onMudarStatus(s.id, a.status)}
-                                        disabled={s.status === a.status}
+                                        disabled={s.status === a.status || emAvaliacao}
+                                        title={emAvaliacao ? 'Paciente em avaliação' : undefined}
                                         className={`px-2 py-1 text-[10px] rounded border font-medium normal-case transition-colors ${
-                                          s.status === a.status
-                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default'
+                                          s.status === a.status || emAvaliacao
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default opacity-60'
                                             : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                                         }`}
                                       >

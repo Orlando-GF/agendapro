@@ -6,7 +6,7 @@ import {
   listarTerapeutas, salvarTerapeuta, excluirTerapeuta,
   listarEspecialidades, salvarEspecialidade, excluirEspecialidade,
   listarHorarios, salvarHorario, excluirHorario,
-  listarSessoes, salvarSessao, excluirSessao, atualizarStatusSessao, atualizarStatusTerapeutaSessao, moverSessao, cancelarSessoesDoDia,
+  listarSessoes, salvarSessao, excluirSessao, atualizarStatusSessao, atualizarStatusTerapeutaSessao, marcarAusenciaProfissional, marcarAusenciaProfissionalDia, moverSessao, cancelarSessoesDoDia,
   listarBloqueios, criarBloqueio, excluirBloqueio,
   listarAusencias, salvarAusencia, excluirAusencia,
   listarHistoricoPaciente, listarHistoricoTerapeuta, listarEstatisticasGerais,
@@ -99,7 +99,8 @@ function CadastroTeacolheInner({
 
   // Pacientes
   const [filtroPacientes, setFiltroPacientes] = useState('')
-  const { pacientes, loading: loadingPacientes, stats, recarregar: recarregarPacientes } = usePacientes(filtroPacientes, toastError)
+  const [paginaPacientes, setPaginaPacientes] = useState(1)
+  const { pacientes, loading: loadingPacientes, stats, hasMore, total: totalPacientes, recarregar: recarregarPacientes } = usePacientes(filtroPacientes, paginaPacientes)
   const [pacienteEdicao, setPacienteEdicao] = useState<Patient | null>(null)
 
   // Terapeutas
@@ -131,7 +132,7 @@ function CadastroTeacolheInner({
 
   // Recepção
   const [dataRecepcao, setDataRecepcao] = useState<Date>(new Date())
-  const { sessoes: sessoesHoje, ausencias: ausenciasRecepcao, loading: loadingRecepcao, recarregar: recarregarRecepcao } = useRecepcao(dataRecepcao, view, toastError)
+  const { sessoes: sessoesHoje, ausencias: ausenciasRecepcao, bloqueios: bloqueiosRecepcao, horariosPadrao, loading: loadingRecepcao, recarregar: recarregarRecepcao } = useRecepcao(dataRecepcao, view, toastError)
 
   // Loading global para ações (salvar/excluir)
   const [submitting, setSubmitting] = useState(false)
@@ -170,7 +171,7 @@ function CadastroTeacolheInner({
   }
 
   const recarregarView = async () => {
-    if (view === 'pacientes') await recarregarPacientes(filtroPacientes)
+    if (view === 'pacientes') await recarregarPacientes()
     if (view === 'terapeutas') await recarregarTerapeutas()
     if (view === 'especialidades') await recarregarEspecialidades()
     if (view === 'horarios') await recarregarHorarios()
@@ -266,6 +267,34 @@ function CadastroTeacolheInner({
       await recarregarView()
     } catch (err: any) {
       toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleMarcarAusenciaProfissional = async (sessaoId: string, terapeutaId: string, motivo: string) => {
+    setSubmitting(true)
+    try {
+      await marcarAusenciaProfissional(sessaoId, terapeutaId, motivo)
+      success('Ausência do profissional registrada')
+      await recarregarView()
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleMarcarAusenciaProfissionalDia = async (terapeutaId: string, data: string, motivo: string) => {
+    setSubmitting(true)
+    try {
+      const qtd = await marcarAusenciaProfissionalDia(terapeutaId, data, motivo)
+      success(`${qtd} sessões marcadas com ausência`)
+      await recarregarView()
+      return qtd
+    } catch (err: any) {
+      toastError(err.message)
+      throw err
     } finally {
       setSubmitting(false)
     }
@@ -451,7 +480,7 @@ function CadastroTeacolheInner({
                 <input type="text" placeholder="Buscar por nome ou prontuário..." value={filtroPacientes} onChange={e => setFiltroPacientes(e.target.value)} className="flex-1 max-w-md rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 {loadingPacientes && <span className="text-sm text-gray-500">Carregando...</span>}
               </div>
-              <PacienteTable pacientes={pacientes} onEditar={p => abrirForm('paciente', p)} onExcluir={id => handleExcluir('paciente', id)} />
+              <PacienteTable pacientes={pacientes} page={paginaPacientes} hasMore={hasMore} total={totalPacientes} onEditar={p => abrirForm('paciente', p)} onExcluir={id => handleExcluir('paciente', id)} onMudarPagina={setPaginaPacientes} />
             </>
           )}
 
@@ -479,7 +508,7 @@ function CadastroTeacolheInner({
           {view === 'recepcao' && (
             <>
               {loadingRecepcao && <span className="text-sm text-gray-500 mb-2 block">Carregando...</span>}
-              <RecepcaoView sessoes={sessoesHoje} terapeutas={terapeutas} ausencias={ausenciasRecepcao} dataAtual={dataRecepcao} terapeutaFiltro={terapeutaFiltro} onMudarData={setDataRecepcao} onMudarStatus={handleMudarStatusSessao} onMudarStatusTerapeuta={handleMudarStatusTerapeuta} onCancelarDia={handleCancelarDia} />
+              <RecepcaoView sessoes={sessoesHoje} terapeutas={terapeutas} horarios={horarios} ausencias={ausenciasRecepcao} bloqueios={bloqueiosRecepcao} horariosPadrao={horariosPadrao} dataAtual={dataRecepcao} terapeutaFiltro={terapeutaFiltro} onMudarData={setDataRecepcao} onMudarStatus={handleMudarStatusSessao} onMudarStatusTerapeuta={handleMudarStatusTerapeuta} onMarcarAusenciaProfissional={handleMarcarAusenciaProfissional} onMarcarAusenciaProfissionalDia={handleMarcarAusenciaProfissionalDia} onCancelarDia={handleCancelarDia} />
             </>
           )}
 

@@ -39,15 +39,23 @@ export interface SessaoWhatsApp {
   tipo?: string | null
   titulo?: string | null
   paciente_nome?: string
+  paciente_codigo?: string | null
+  paciente_em_avaliacao?: boolean | null
   terapeutas?: { nome: string }[]
 }
 
+function abreviarNome(nome: string): string {
+  const partes = nome.trim().split(/\s+/)
+  if (partes.length <= 2) return nome
+  return `${partes[0]} ${partes[1]}`
+}
+
 function formatarLinhaSessao(s: SessaoWhatsApp): string {
-  const emoji = STATUS_EMOJI[s.status] || '⚪'
-  const statusFmt = s.status.replace(/_/g, ' ')
-  const nome = s.tipo !== 'SESSAO' ? (s.titulo || s.tipo) : (s.paciente_nome || 'Sem nome')
-  const hora = `${s.hora_inicio.slice(0, 5)} — ${s.hora_fim.slice(0, 5)}`
-  return `${emoji} ${hora} — ${nome} (${statusFmt})`
+  const nomeCompleto = s.tipo !== 'SESSAO' ? (s.titulo || s.tipo || '') : (s.paciente_nome || 'Sem nome')
+  const nome = abreviarNome(nomeCompleto)
+  const prontuario = s.paciente_codigo || '-'
+  const hora = `${s.hora_inicio.slice(0, 5)}`
+  return `${hora} — ${prontuario} — ${nome}`
 }
 
 function formatarListaPorDia(sessoes: SessaoWhatsApp[], titulo: string): string {
@@ -68,50 +76,69 @@ function formatarListaPorDia(sessoes: SessaoWhatsApp[], titulo: string): string 
   return resultado
 }
 
-export function formatarAgendaWhatsApp(sessoes: SessaoWhatsApp[], titulo: string): string {
-  if (sessoes.length === 0) {
+export function formatarAgendaWhatsApp(
+  sessoes: SessaoWhatsApp[],
+  titulo: string,
+  horarios?: { hora_inicio: string; hora_fim: string }[]
+): string {
+  // Filtra só sessões reais (não horários vazios)
+  const sessoesReais = sessoes.filter(s => s.tipo === 'SESSAO')
+  if (sessoesReais.length === 0) {
     return `${titulo}\n\nNenhum atendimento.`
   }
 
-  const ordenadas = [...sessoes].sort((a, b) => {
+  const ordenadas = [...sessoesReais].sort((a, b) => {
     const da = a.data + '|' + a.hora_inicio
     const db = b.data + '|' + b.hora_inicio
     return da.localeCompare(db)
   })
 
-  // Verifica se há terapeutas para agrupar
-  const temTerapeutas = ordenadas.some(s => (s.terapeutas || []).length > 0)
-  if (!temTerapeutas) {
-    return formatarListaPorDia(ordenadas, titulo)
-  }
-
-  // Agrupa sessões por terapeuta
+  // Agrupa por equipe (conjunto de terapeutas)
   const mapa = new Map<string, SessaoWhatsApp[]>()
   for (const s of ordenadas) {
-    const ts = s.terapeutas || []
-    if (ts.length === 0) {
-      const chave = 'SEM TERAPEUTA'
-      const lista = mapa.get(chave) || []
-      lista.push(s)
-      mapa.set(chave, lista)
-    } else {
-      for (const t of ts) {
-        const chave = t.nome
-        const lista = mapa.get(chave) || []
-        lista.push(s)
-        mapa.set(chave, lista)
+    const ts = (s.terapeutas || []).map(t => t.nome).sort()
+    const chave = ts.length > 0 ? ts.join(' + ') : 'SEM TERAPEUTA'
+    const lista = mapa.get(chave) || []
+    lista.push(s)
+    mapa.set(chave, lista)
+  }
+
+  // Se tiver horários, preenche os vazios para cada equipe
+  if (horarios && horarios.length > 0) {
+    for (const [equipe, lista] of mapa) {
+      const dataRef = lista[0]?.data || ''
+      const terapeutas = equipe !== 'SEM TERAPEUTA'
+        ? equipe.split(' + ').map(n => ({ nome: n }))
+        : []
+      // Horários já ocupados por esta equipe
+      const ocupados = new Set(lista.map(s => `${s.hora_inicio.slice(0, 5)}|${s.hora_fim.slice(0, 5)}`))
+      for (const h of horarios) {
+        const timeKey = `${h.hora_inicio.slice(0, 5)}|${h.hora_fim.slice(0, 5)}`
+        if (!ocupados.has(timeKey)) {
+          lista.push({
+            data: dataRef,
+            hora_inicio: h.hora_inicio,
+            hora_fim: h.hora_fim,
+            status: 'AGENDADO',
+            tipo: 'VAZIO',
+            terapeutas,
+          })
+        }
       }
+      // Reordena por hora
+      lista.sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
     }
   }
 
-  // Ordena terapeutas alfabeticamente
-  const terapeutasOrdenados = Array.from(mapa.keys()).sort((a, b) => a.localeCompare(b))
+  // Ordena equipes alfabeticamente
+  const equipesOrdenadas = Array.from(mapa.keys()).sort((a, b) => a.localeCompare(b))
 
   let resultado = `📅 *${titulo}*\n`
 
-  for (const nomeTerapeuta of terapeutasOrdenados) {
-    resultado += `\n*${nomeTerapeuta.toUpperCase()}*\n`
-    const lista = mapa.get(nomeTerapeuta)!
+  for (const equipe of equipesOrdenadas) {
+    const terapeutasFmt = equipe.split(' + ').map(n => abreviarNome(n)).join(' + ')
+    resultado += `\n*${terapeutasFmt.toUpperCase()}*\n`
+    const lista = mapa.get(equipe)!
     let ultimaData = ''
 
     for (const s of lista) {
@@ -119,11 +146,12 @@ export function formatarAgendaWhatsApp(sessoes: SessaoWhatsApp[], titulo: string
         const d = new Date(s.data + 'T00:00:00')
         const diaSemana = DIAS_SEMANA[d.getDay()]
         const dataFmt = formatDateBRFromISO(s.data)
-        resultado += `_${diaSemana} — ${dataFmt}_\n`
+        resultado += `▫️ ${diaSemana}, ${dataFmt}\n`
         ultimaData = s.data
       }
       resultado += `${formatarLinhaSessao(s)}\n`
     }
+    resultado += `\n`
   }
 
   return resultado

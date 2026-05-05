@@ -1,12 +1,15 @@
 'use client'
 
-import { useState } from 'react'
-import { Patient, PatientFormData } from '../actions'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { PatientSchema } from '@/server/domains/pacientes/schema'
+import type { PatientInput } from '@/server/domains/pacientes/schema'
+import type { Patient } from '@/server/domains/pacientes/types'
 import { SidepanelContainer } from './SidepanelContainer'
 
 interface Props {
   paciente?: Patient | null
-  onSalvar: (dados: PatientFormData) => void
+  onSalvar: (dados: PatientInput & { id?: string }) => void
   onCancelar: () => void
 }
 
@@ -17,7 +20,7 @@ function formatTelefone(val: string): string {
   return `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`
 }
 
-function buildInitialForm(paciente: Patient | null | undefined): PatientFormData {
+function buildDefaults(paciente: Patient | null | undefined): PatientInput & { id?: string } {
   if (paciente) {
     return {
       id: paciente.id,
@@ -31,7 +34,7 @@ function buildInitialForm(paciente: Patient | null | undefined): PatientFormData
       whatsapp_adicionado: paciente.whatsapp_adicionado ?? false,
       judicial: paciente.judicial ?? false,
       observacoes: paciente.observacoes ?? null,
-      status_tratamento: paciente.status_tratamento ?? 'EM_TRATAMENTO',
+      status_tratamento: (paciente.status_tratamento as any) ?? 'EM_TRATAMENTO',
       motivo_saida: paciente.motivo_saida ?? null,
       data_saida: paciente.data_saida ?? null,
     }
@@ -54,49 +57,39 @@ function buildInitialForm(paciente: Patient | null | undefined): PatientFormData
 }
 
 export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
-  const [form, setForm] = useState<PatientFormData>(() => buildInitialForm(paciente))
-  const [erros, setErros] = useState<Record<string, string>>({})
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<PatientInput>({
+    resolver: zodResolver(PatientSchema),
+    defaultValues: buildDefaults(paciente),
+  })
 
-  const handleChange = (field: keyof PatientFormData, value: unknown) => {
-    setForm(prev => ({ ...prev, [field]: value }))
-    if (erros[field]) {
-      setErros(prev => { const next = { ...prev }; delete next[field]; return next })
-    }
-  }
+  const statusTratamento = watch('status_tratamento')
 
-  const validar = (): boolean => {
-    const next: Record<string, string> = {}
-    if (!form.nome.trim()) next.nome = 'NOME É OBRIGATÓRIO'
-    setErros(next)
-    return Object.keys(next).length === 0
-  }
-
-  const handleSalvar = async () => {
-    if (!validar()) return
-    setIsSubmitting(true)
-    try {
-      await onSalvar(form)
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const inputErro = (field: string) => erros[field] ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'
+  const inputClass = (fieldError?: boolean) =>
+    `w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 ${
+      fieldError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'
+    }`
 
   return (
     <SidepanelContainer titulo={paciente ? 'EDITAR PACIENTE' : 'NOVO PACIENTE'} onFechar={onCancelar}>
-      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+      <form
+        onSubmit={handleSubmit(onSalvar)}
+        className="flex-1 overflow-y-auto p-6 space-y-5"
+      >
         {/* Nome */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">NOME *</label>
           <input
             type="text"
-            value={form.nome}
-            onChange={e => handleChange('nome', e.target.value)}
-            className={`w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 ${inputErro('nome')}`}
+            {...register('nome')}
+            className={inputClass(!!errors.nome)}
           />
-          {erros.nome && <p className="mt-1 text-xs text-red-600">{erros.nome}</p>}
+          {errors.nome && <p className="mt-1 text-xs text-red-600">{errors.nome.message}</p>}
         </div>
 
         {/* Código */}
@@ -104,9 +97,8 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
           <label className="block text-sm font-medium text-gray-700 mb-1">CÓDIGO</label>
           <input
             type="text"
-            value={form.codigo ?? ''}
-            onChange={e => handleChange('codigo', e.target.value || null)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            {...register('codigo')}
+            className={inputClass()}
           />
         </div>
 
@@ -114,21 +106,27 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">TELEFONE</label>
-            <input
-              type="text"
-              value={form.telefone ?? ''}
-              onChange={e => handleChange('telefone', formatTelefone(e.target.value) || null)}
-              placeholder="(77) 99999-9999"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            <Controller
+              name="telefone"
+              control={control}
+              render={({ field }) => (
+                <input
+                  type="text"
+                  {...field}
+                  value={field.value ?? ''}
+                  onChange={e => field.onChange(formatTelefone(e.target.value) || null)}
+                  placeholder="(77) 99999-9999"
+                  className={inputClass()}
+                />
+              )}
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">RESPONSÁVEL</label>
             <input
               type="text"
-              value={form.responsavel ?? ''}
-              onChange={e => handleChange('responsavel', e.target.value || null)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              {...register('responsavel')}
+              className={inputClass()}
             />
           </div>
         </div>
@@ -137,10 +135,9 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">OBSERVAÇÕES</label>
           <textarea
-            value={form.observacoes ?? ''}
-            onChange={e => handleChange('observacoes', e.target.value || null)}
+            {...register('observacoes')}
             rows={3}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className={inputClass()}
           />
         </div>
 
@@ -148,9 +145,8 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">STATUS DO TRATAMENTO</label>
           <select
-            value={form.status_tratamento ?? 'EM_TRATAMENTO'}
-            onChange={e => handleChange('status_tratamento', e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            {...register('status_tratamento')}
+            className={`${inputClass()} bg-white`}
           >
             <option value="EM_TRATAMENTO">EM TRATAMENTO</option>
             <option value="ALTA">ALTA</option>
@@ -160,25 +156,23 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
         </div>
 
         {/* Motivo da Saída + Data (só quando não é EM_TRATAMENTO) */}
-        {form.status_tratamento !== 'EM_TRATAMENTO' && (
+        {statusTratamento !== 'EM_TRATAMENTO' && (
           <>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">MOTIVO DA SAÍDA</label>
               <textarea
-                value={form.motivo_saida ?? ''}
-                onChange={e => handleChange('motivo_saida', e.target.value || null)}
+                {...register('motivo_saida')}
                 rows={2}
                 placeholder="Ex: Mudou para São Paulo, problemas financeiros..."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={inputClass()}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">DATA DA SAÍDA</label>
               <input
                 type="date"
-                value={form.data_saida ?? ''}
-                onChange={e => handleChange('data_saida', e.target.value || null)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                {...register('data_saida')}
+                className={inputClass()}
               />
             </div>
           </>
@@ -191,8 +185,7 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
             <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
               <input
                 type="checkbox"
-                checked={form.ativo ?? true}
-                onChange={e => handleChange('ativo', e.target.checked)}
+                {...register('ativo')}
                 className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <span className="text-sm font-medium text-gray-700">ATIVO</span>
@@ -200,8 +193,7 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
             <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
               <input
                 type="checkbox"
-                checked={form.em_avaliacao ?? false}
-                onChange={e => handleChange('em_avaliacao', e.target.checked)}
+                {...register('em_avaliacao')}
                 className="w-5 h-5 rounded border-gray-300 text-yellow-600 focus:ring-yellow-500"
               />
               <span className="text-sm font-medium text-gray-700">EM AVALIAÇÃO</span>
@@ -209,8 +201,7 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
             <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
               <input
                 type="checkbox"
-                checked={form.whatsapp_adicionado ?? false}
-                onChange={e => handleChange('whatsapp_adicionado', e.target.checked)}
+                {...register('whatsapp_adicionado')}
                 className="w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
               />
               <span className="text-sm font-medium text-gray-700">WHATSAPP ADICIONADO</span>
@@ -218,19 +209,66 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
             <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
               <input
                 type="checkbox"
-                checked={form.judicial ?? false}
-                onChange={e => handleChange('judicial', e.target.checked)}
+                {...register('judicial')}
                 className="w-5 h-5 rounded border-gray-300 text-red-600 focus:ring-red-500"
               />
               <span className="text-sm font-medium text-gray-700">JUDICIAL</span>
             </label>
           </div>
         </div>
-      </div>
+      </form>
+
+      {/* LGPD */}
+      {paciente && (
+        <div className="px-6 py-3 border-t bg-gray-50">
+          <div className="text-xs font-semibold text-gray-500 mb-2 uppercase">LGPD — Privacidade</div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch(`/api/gdpr/export?paciente_id=${paciente.id}`)
+                const json = await res.json()
+                const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `lgpd_export_${paciente.id}.json`
+                a.click()
+                URL.revokeObjectURL(url)
+              }}
+              className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-white font-medium text-xs normal-case"
+            >
+              📥 EXPORTAR DADOS
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!confirm('ATENÇÃO: Esta ação anonimiza permanentemente os dados pessoais deste paciente (LGPD).\n\nDeseja continuar?')) return
+                const res = await fetch('/api/gdpr/delete', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ paciente_id: paciente.id }),
+                })
+                const json = await res.json()
+                if (json.sucesso) {
+                  alert('Dados anonimizados com sucesso.')
+                  onCancelar()
+                } else {
+                  alert('Erro: ' + json.error)
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 font-medium text-xs normal-case"
+            >
+              🗑️ ANONIMIZAR DADOS
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
         <button
+          type="button"
           onClick={onCancelar}
           disabled={isSubmitting}
           className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-white font-medium bg-gray-100 disabled:opacity-50 normal-case"
@@ -238,7 +276,8 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
           CANCELAR
         </button>
         <button
-          onClick={handleSalvar}
+          type="submit"
+          onClick={handleSubmit(onSalvar)}
           disabled={isSubmitting}
           className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed normal-case"
         >

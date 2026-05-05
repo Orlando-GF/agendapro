@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./components/Providers";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -24,7 +25,9 @@ export default function RootLayout({
       className={`${inter.variable} antialiased uppercase`}
       suppressHydrationWarning
     >
-      <body className="h-screen overflow-hidden uppercase">{children}</body>
+      <body className="h-screen overflow-hidden uppercase" suppressHydrationWarning>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

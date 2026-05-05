@@ -4,11 +4,15 @@ import { Patient } from '../actions'
 
 interface Props {
   pacientes: Patient[]
+  page: number
+  hasMore: boolean
+  total: number
   onEditar: (p: Patient) => void
   onExcluir: (id: string) => void
+  onMudarPagina: (page: number) => void
 }
 
-export function PacienteTable({ pacientes, onEditar, onExcluir }: Props) {
+export function PacienteTable({ pacientes, page, hasMore, total, onEditar, onExcluir, onMudarPagina }: Props) {
   if (pacientes.length === 0) {
     return (
       <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
@@ -103,6 +107,29 @@ export function PacienteTable({ pacientes, onEditar, onExcluir }: Props) {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Paginação */}
+      <div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
+        <div className="text-xs text-gray-500">
+          Página {page} — {total} total
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onMudarPagina(page - 1)}
+            disabled={page <= 1}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-xs normal-case disabled:opacity-50 disabled:cursor-default"
+          >
+            ← ANTERIOR
+          </button>
+          <button
+            onClick={() => onMudarPagina(page + 1)}
+            disabled={!hasMore}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium text-xs normal-case disabled:opacity-50 disabled:cursor-default"
+          >
+            PRÓXIMA →
+          </button>
+        </div>
       </div>
     </div>
   )

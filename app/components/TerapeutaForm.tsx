@@ -1,7 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Terapeuta, TerapeutaFormData, Especialidade, Ausencia, AusenciaFormData } from '../actions'
+import { useState } from 'react'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { TerapeutaSchema } from '@/server/domains/terapeutas/schema'
+import type { TerapeutaInput } from '@/server/domains/terapeutas/schema'
+import type { Terapeuta, Especialidade, Ausencia, AusenciaFormData } from '../actions'
 import { SidepanelContainer } from './SidepanelContainer'
 import { FormInput } from './FormInput'
 import { FormSelect } from './FormSelect'
@@ -18,78 +22,56 @@ interface Props {
   terapeuta?: Terapeuta | null
   especialidades: Especialidade[]
   ausencias?: Ausencia[]
-  onSalvar: (dados: TerapeutaFormData) => void
+  onSalvar: (dados: TerapeutaInput & { id?: string }) => void
   onSalvarAusencia?: (dados: AusenciaFormData) => void
   onExcluirAusencia?: (id: string) => void
   onCancelar: () => void
 }
 
 export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, onSalvarAusencia, onExcluirAusencia, onCancelar }: Props) {
-  const [form, setForm] = useState<TerapeutaFormData>({
-    nome: '',
-    telefone: null,
-    especialidade_id: null,
-    dias_trabalho: [],
-    ativo: true,
+  const {
+    register,
+    handleSubmit,
+    control,
+    formState: { errors, isSubmitting },
+  } = useForm<TerapeutaInput>({
+    resolver: zodResolver(TerapeutaSchema),
+    defaultValues: {
+      id: terapeuta?.id,
+      nome: terapeuta?.nome || '',
+      telefone: terapeuta?.telefone ?? null,
+      especialidade_id: terapeuta?.especialidade_id ?? null,
+      dias_trabalho: terapeuta?.dias_trabalho ?? [],
+      ativo: terapeuta?.ativo ?? true,
+    },
   })
-  const [erros, setErros] = useState<Record<string, string>>({})
+
   const [novaAusencia, setNovaAusencia] = useState<{ data_inicio: string; data_fim: string; motivo: string }>({ data_inicio: '', data_fim: '', motivo: 'FOLGA' })
-
-  useEffect(() => {
-    if (terapeuta) {
-      setForm({
-        id: terapeuta.id,
-        nome: terapeuta.nome || '',
-        telefone: terapeuta.telefone ?? null,
-        especialidade_id: terapeuta.especialidade_id ?? null,
-        dias_trabalho: terapeuta.dias_trabalho ?? [],
-        ativo: terapeuta.ativo ?? true,
-      })
-    } else {
-      setForm({ nome: '', telefone: null, especialidade_id: null, dias_trabalho: [], ativo: true })
-    }
-    setErros({})
-  }, [terapeuta])
-
-  const handleChange = (field: keyof TerapeutaFormData, value: unknown) => {
-    setForm(prev => ({ ...prev, [field]: value }))
-    if (erros[field]) {
-      setErros(prev => { const next = { ...prev }; delete next[field]; return next })
-    }
-  }
-
-  const validar = (): boolean => {
-    const next: Record<string, string> = {}
-    if (!form.nome.trim()) next.nome = 'Nome é obrigatório'
-    setErros(next)
-    return Object.keys(next).length === 0
-  }
-
-  const handleSalvar = () => {
-    if (!validar()) return
-    onSalvar(form)
-  }
 
   return (
     <SidepanelContainer titulo={terapeuta ? 'Editar Terapeuta' : 'Novo Terapeuta'} onFechar={onCancelar}>
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <form onSubmit={handleSubmit(onSalvar)} className="flex-1 overflow-y-auto p-6 space-y-4">
         <FormInput
           label="Nome *"
-          value={form.nome}
-          onChange={e => handleChange('nome', e.target.value)}
-          erro={erros.nome}
+          {...register('nome')}
+          erro={errors.nome?.message}
         />
 
-        <FormInput
-          label="Telefone"
-          value={form.telefone ?? ''}
-          onChange={e => handleChange('telefone', formatTelefone(e.target.value) || null)}
+        <Controller
+          name="telefone"
+          control={control}
+          render={({ field }) => (
+            <FormInput
+              label="Telefone"
+              value={field.value ?? ''}
+              onChange={e => field.onChange(formatTelefone(e.target.value) || null)}
+            />
+          )}
         />
 
         <FormSelect
           label="Especialidade"
-          value={form.especialidade_id ?? ''}
-          onChange={e => handleChange('especialidade_id', e.target.value || null)}
+          {...register('especialidade_id')}
         >
           <option value="">Selecione...</option>
           {especialidades.map(esp => (
@@ -97,25 +79,30 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
           ))}
         </FormSelect>
 
-        <FormCheckboxGroup
-          label="Dias de Trabalho"
-          options={[
-            { value: 'Segunda-feira', label: 'Segunda' },
-            { value: 'Terça-feira', label: 'Terça' },
-            { value: 'Quarta-feira', label: 'Quarta' },
-            { value: 'Quinta-feira', label: 'Quinta' },
-            { value: 'Sexta-feira', label: 'Sexta' },
-          ]}
-          selected={form.dias_trabalho ?? []}
-          onChange={vals => handleChange('dias_trabalho', vals)}
+        <Controller
+          name="dias_trabalho"
+          control={control}
+          render={({ field }) => (
+            <FormCheckboxGroup
+              label="Dias de Trabalho"
+              options={[
+                { value: 'Segunda-feira', label: 'Segunda' },
+                { value: 'Terça-feira', label: 'Terça' },
+                { value: 'Quarta-feira', label: 'Quarta' },
+                { value: 'Quinta-feira', label: 'Quinta' },
+                { value: 'Sexta-feira', label: 'Sexta' },
+              ]}
+              selected={field.value ?? []}
+              onChange={vals => field.onChange(vals)}
+            />
+          )}
         />
 
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
             id="terapeuta-ativo"
-            checked={form.ativo ?? true}
-            onChange={e => handleChange('ativo', e.target.checked)}
+            {...register('ativo')}
             className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
           <label htmlFor="terapeuta-ativo" className="text-sm font-medium text-gray-700">
@@ -161,6 +148,7 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
                   <option value="OUTRO">Outro</option>
                 </select>
                 <button
+                  type="button"
                   onClick={() => {
                     if (!novaAusencia.data_inicio || !novaAusencia.data_fim) return
                     onSalvarAusencia({
@@ -197,6 +185,7 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
                       </div>
                       {onExcluirAusencia && (
                         <button
+                          type="button"
                           onClick={() => onExcluirAusencia(a.id)}
                           className="text-red-600 hover:text-red-800 text-xs font-medium normal-case"
                         >
@@ -209,18 +198,22 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
             )}
           </div>
         )}
-      </div>
+      </form>
 
       <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
         <button
+          type="button"
           onClick={onCancelar}
-          className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-white font-medium bg-gray-100 normal-case"
+          disabled={isSubmitting}
+          className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-white font-medium bg-gray-100 disabled:opacity-50 normal-case"
         >
           Cancelar
         </button>
         <button
-          onClick={handleSalvar}
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium normal-case"
+          type="submit"
+          onClick={handleSubmit(onSalvar)}
+          disabled={isSubmitting}
+          className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50 normal-case"
         >
           Salvar
         </button>

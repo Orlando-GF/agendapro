@@ -1,43 +1,66 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { listarSessoes, listarAusencias, Sessao, Ausencia } from '../actions'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { recepcaoDia, listarAusencias, listarBloqueios, Sessao, Ausencia, Bloqueio } from '../actions'
 import { formatDateISO } from '@/lib/date-helpers'
+import { useRealtime } from './useRealtime'
 
-export function useRecepcao(dataRecepcao: Date, viewAtiva: string, toastError: (msg: string) => void) {
-  const [sessoes, setSessoes] = useState<Sessao[]>([])
-  const [ausencias, setAusencias] = useState<Ausencia[]>([])
-  const [loading, setLoading] = useState(false)
+export function useRecepcao(dataAtual: Date, viewAtiva: string, _toastError?: (msg: string) => void) {
+  const queryClient = useQueryClient()
+  const dataISO = formatDateISO(dataAtual)
 
-  useEffect(() => {
-    if (viewAtiva !== 'recepcao') return
-    setLoading(true)
-    let cancelled = false
-    const dia = formatDateISO(dataRecepcao)
-    Promise.all([
-      listarSessoes(dia, dia),
-      listarAusencias(),
-    ])
-      .then(([sessoesData, ausenciasData]) => {
-        if (!cancelled) {
-          setSessoes(sessoesData)
-          setAusencias(ausenciasData)
-        }
-      })
-      .catch(err => { if (!cancelled) toastError(err.message) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [viewAtiva, dataRecepcao])
+  const enabled = viewAtiva === 'recepcao'
 
-  const recarregar = async () => {
-    const dia = formatDateISO(dataRecepcao)
-    const [sessoesData, ausenciasData] = await Promise.all([
-      listarSessoes(dia, dia),
-      listarAusencias(),
-    ])
-    setSessoes(sessoesData)
-    setAusencias(ausenciasData)
+  const sessoesQuery = useQuery({
+    queryKey: ['recepcao', 'sessoes', dataISO],
+    queryFn: () => recepcaoDia(dataISO),
+    enabled,
+    staleTime: 15_000,
+  })
+
+  const ausenciasQuery = useQuery({
+    queryKey: ['recepcao', 'ausencias'],
+    queryFn: () => listarAusencias(),
+    enabled,
+    staleTime: 60_000,
+  })
+
+  const bloqueiosQuery = useQuery({
+    queryKey: ['recepcao', 'bloqueios', dataISO],
+    queryFn: () => listarBloqueios(dataISO, dataISO),
+    enabled,
+    staleTime: 30_000,
+  })
+
+  const loading = sessoesQuery.isLoading || ausenciasQuery.isLoading || bloqueiosQuery.isLoading
+
+  const recarregarTudo = () => {
+    queryClient.refetchQueries({ queryKey: ['recepcao', 'sessoes', dataISO], type: 'active' })
+    queryClient.refetchQueries({ queryKey: ['recepcao', 'ausencias'], type: 'active' })
+    queryClient.refetchQueries({ queryKey: ['recepcao', 'bloqueios', dataISO], type: 'active' })
+    queryClient.invalidateQueries({ queryKey: ['agenda'] })
+    queryClient.invalidateQueries({ queryKey: ['relatorios'] })
   }
 
-  return { sessoes, ausencias, loading, recarregar }
+  useRealtime({ table: 'sessoes', onChange: recarregarTudo })
+  useRealtime({ table: 'sessao_terapeutas', onChange: recarregarTudo })
+  useRealtime({ table: 'ausencias', onChange: recarregarTudo })
+  useRealtime({ table: 'bloqueios', onChange: recarregarTudo })
+
+  const recarregar = async () => {
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ['recepcao', 'sessoes', dataISO], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['recepcao', 'ausencias'], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['recepcao', 'bloqueios', dataISO], type: 'active' }),
+    ])
+  }
+
+  return {
+    sessoes: sessoesQuery.data ?? [],
+    ausencias: ausenciasQuery.data ?? [],
+    bloqueios: bloqueiosQuery.data ?? [],
+    horariosPadrao: undefined as Map<string, Set<string>> | undefined,
+    loading,
+    recarregar,
+  }
 }

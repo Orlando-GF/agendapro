@@ -1,34 +1,37 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { listarPacientes, contarPacientes, Patient } from '../actions'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { listarPacientesPaginado, contarPacientes, Patient } from '../actions'
 
-export function usePacientes(filtro: string, toastError: (msg: string) => void) {
-  const [pacientes, setPacientes] = useState<Patient[]>([])
-  const [loading, setLoading] = useState(false)
-  const [stats, setStats] = useState({ total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0 })
+export function usePacientes(filtro: string, page: number = 1, limit: number = 50) {
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    setLoading(true)
-    const timer = setTimeout(() => {
-      listarPacientes(filtro || undefined)
-        .then(setPacientes)
-        .catch(err => toastError(err.message))
-        .finally(() => setLoading(false))
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [filtro])
+  const pacientesQuery = useQuery({
+    queryKey: ['pacientes', 'list', filtro, page, limit],
+    queryFn: () => listarPacientesPaginado(page, limit, filtro || undefined),
+    staleTime: 30_000,
+  })
 
-  useEffect(() => {
-    contarPacientes().then(setStats).catch(err => toastError(err.message))
-  }, [pacientes.length])
+  const statsQuery = useQuery({
+    queryKey: ['pacientes', 'stats'],
+    queryFn: () => contarPacientes(),
+    staleTime: 60_000,
+  })
 
-  const recarregar = async (filtroAtual?: string) => {
-    const p = await listarPacientes(filtroAtual || undefined)
-    setPacientes(p)
-    const c = await contarPacientes()
-    setStats(c)
+  const recarregar = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['pacientes', 'list'] }),
+      queryClient.invalidateQueries({ queryKey: ['pacientes', 'stats'] }),
+    ])
   }
 
-  return { pacientes, loading, stats, recarregar }
+  return {
+    pacientes: pacientesQuery.data?.data ?? [],
+    total: pacientesQuery.data?.total ?? 0,
+    hasMore: pacientesQuery.data?.hasMore ?? false,
+    loading: pacientesQuery.isLoading,
+    stats: statsQuery.data ?? { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0 },
+    recarregar,
+    page,
+  }
 }

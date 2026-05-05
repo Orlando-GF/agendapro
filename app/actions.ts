@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { formatDateISO } from '@/lib/date-helpers'
 
 // ========== PACIENTES ==========
 
@@ -96,6 +97,7 @@ export interface SessaoTerapeuta {
   especialidade_nome?: string | null
   ativo?: boolean | null
   status?: string | null
+  observacoes?: string | null
 }
 
 export interface Sessao {
@@ -103,6 +105,7 @@ export interface Sessao {
   paciente_id?: string | null
   paciente_nome?: string
   paciente_codigo?: string | null
+  paciente_em_avaliacao?: boolean | null
   data: string
   hora_inicio: string
   hora_fim: string
@@ -154,6 +157,36 @@ export async function listarPacientes(filtro?: string): Promise<Patient[]> {
   return (rows as Patient[]) || []
 }
 
+export async function listarPacientesPaginado(
+  page: number = 1,
+  limit: number = 50,
+  filtro?: string
+): Promise<{ data: Patient[]; total: number; hasMore: boolean }> {
+  const supabase = await createClient()
+  const from = (page - 1) * limit
+  const to = from + limit - 1
+
+  let query = supabase
+    .from('patients')
+    .select('*', { count: 'exact' })
+    .order('nome', { ascending: true })
+    .range(from, to)
+
+  if (filtro) {
+    const term = `%${filtro}%`
+    query = query.or(`nome.ilike.${term},codigo.ilike.${term}`)
+  }
+
+  const { data: rows, error, count } = await query
+  if (error) throw new Error(error.message)
+
+  return {
+    data: (rows as Patient[]) || [],
+    total: count || 0,
+    hasMore: (count || 0) > to + 1,
+  }
+}
+
 export async function salvarPaciente(dados: PatientFormData): Promise<Patient> {
   const supabase = createAdminClient()
   const normalizado = {
@@ -186,6 +219,22 @@ export async function excluirPaciente(id: string): Promise<void> {
   const supabase = createAdminClient()
   const { error } = await supabase.from('patients').delete().eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+export async function dashboardStats(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number }> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc('dashboard_stats')
+  if (error) throw new Error(error.message)
+  if (!data || data.length === 0) {
+    return { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0 }
+  }
+  const row = data[0]
+  return {
+    total: Number(row.total),
+    emAvaliacao: Number(row.em_avaliacao),
+    judicial: Number(row.judicial),
+    semWhatsapp: Number(row.sem_whatsapp),
+  }
 }
 
 export async function contarPacientes(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number }> {
@@ -325,6 +374,7 @@ export async function listarSessoes(dataInicio: string, dataFim: string): Promis
     paciente_id: row.paciente_id,
     paciente_nome: row.paciente_nome,
     paciente_codigo: row.paciente_codigo,
+    paciente_em_avaliacao: row.paciente_em_avaliacao,
     data: row.data,
     hora_inicio: row.hora_inicio,
     hora_fim: row.hora_fim,
@@ -334,7 +384,66 @@ export async function listarSessoes(dataInicio: string, dataFim: string): Promis
     titulo: row.titulo,
     recorrente: row.recorrente,
     terapeutas: Array.isArray(row.terapeutas)
-      ? row.terapeutas.filter((t: any) => t && t.id).map((t: any) => ({ id: t.id, nome: t.nome, especialidade_nome: t.especialidade_nome, ativo: t.ativo, status: t.status }))
+      ? row.terapeutas.filter((t: any) => t && t.id).map((t: any) => ({ id: t.id, nome: t.nome, especialidade_nome: t.especialidade_nome, ativo: t.ativo, status: t.status, observacoes: t.observacoes }))
+      : [],
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }))
+}
+
+// NOVA: agenda semanal otimizada via RPC
+export async function agendaSemana(dataInicio: string, dataFim: string): Promise<Sessao[]> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc('agenda_semana', {
+    p_data_inicio: dataInicio,
+    p_data_fim: dataFim,
+  })
+  if (error) throw new Error(error.message)
+  const rows = (data as Sessao[]) || []
+  return rows.map(row => ({
+    id: row.id,
+    paciente_id: row.paciente_id,
+    paciente_nome: row.paciente_nome,
+    paciente_codigo: row.paciente_codigo,
+    paciente_em_avaliacao: row.paciente_em_avaliacao,
+    data: row.data,
+    hora_inicio: row.hora_inicio,
+    hora_fim: row.hora_fim,
+    status: row.status,
+    observacoes: row.observacoes,
+    tipo: row.tipo,
+    titulo: row.titulo,
+    recorrente: row.recorrente,
+    terapeutas: Array.isArray(row.terapeutas)
+      ? row.terapeutas.filter((t: any) => t && t.id).map((t: any) => ({ id: t.id, nome: t.nome, especialidade_nome: t.especialidade_nome, ativo: t.ativo, status: t.status, observacoes: t.observacoes }))
+      : [],
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }))
+}
+
+// NOVA: recepcao do dia otimizada via RPC
+export async function recepcaoDia(dataParam: string): Promise<Sessao[]> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc('recepcao_dia', { p_data: dataParam })
+  if (error) throw new Error(error.message)
+  const rows = (data as Sessao[]) || []
+  return rows.map(row => ({
+    id: row.id,
+    paciente_id: row.paciente_id,
+    paciente_nome: row.paciente_nome,
+    paciente_codigo: row.paciente_codigo,
+    paciente_em_avaliacao: row.paciente_em_avaliacao,
+    data: row.data,
+    hora_inicio: row.hora_inicio,
+    hora_fim: row.hora_fim,
+    status: row.status,
+    observacoes: row.observacoes,
+    tipo: row.tipo,
+    titulo: row.titulo,
+    recorrente: row.recorrente,
+    terapeutas: Array.isArray(row.terapeutas)
+      ? row.terapeutas.filter((t: any) => t && t.id).map((t: any) => ({ id: t.id, nome: t.nome, especialidade_nome: t.especialidade_nome, ativo: t.ativo, status: t.status, observacoes: t.observacoes }))
       : [],
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -422,7 +531,8 @@ export interface SessaoHistorico {
   tipo: string
   titulo?: string | null
   paciente_nome?: string | null
-  terapeutas: string[]
+  paciente_em_avaliacao?: boolean | null
+  terapeutas: { nome: string; status: string; observacoes?: string | null }[]
 }
 
 export interface StatsResumo {
@@ -433,6 +543,7 @@ export interface StatsResumo {
   atestado: number
   atestadoProfissional: number
   faltaProfissional: number
+  ausenciaProfissional: number
   cancelado: number
   taxaComparecimento: number
 }
@@ -446,7 +557,7 @@ export async function listarHistoricoPaciente(
 
   const { data: rows, error } = await supabase
     .from('sessoes')
-    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome), sessao_terapeutas(terapeutas(nome))')
+    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome), status, observacoes)')
     .eq('paciente_id', pacienteId)
     .gte('data', dataInicio)
     .lte('data', dataFim)
@@ -463,7 +574,10 @@ export async function listarHistoricoPaciente(
     tipo: row.tipo,
     titulo: row.titulo,
     paciente_nome: row.patients?.nome || null,
-    terapeutas: (row.sessao_terapeutas || []).map((st: any) => st.terapeutas?.nome).filter(Boolean),
+    paciente_em_avaliacao: row.patients?.em_avaliacao || null,
+    terapeutas: (row.sessao_terapeutas || [])
+      .filter((st: any) => st.terapeutas?.nome)
+      .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes })),
   }))
 
   const stats = calcularStats(sessoes)
@@ -490,7 +604,7 @@ export async function listarHistoricoTerapeuta(
 
   const { data: rows, error } = await supabase
     .from('sessoes')
-    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome), sessao_terapeutas(terapeutas(nome))')
+    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome), status, observacoes)')
     .in('id', sessaoIds)
     .gte('data', dataInicio)
     .lte('data', dataFim)
@@ -507,11 +621,48 @@ export async function listarHistoricoTerapeuta(
     tipo: row.tipo,
     titulo: row.titulo,
     paciente_nome: row.patients?.nome || null,
-    terapeutas: (row.sessao_terapeutas || []).map((st: any) => st.terapeutas?.nome).filter(Boolean),
+    paciente_em_avaliacao: row.patients?.em_avaliacao || null,
+    terapeutas: (row.sessao_terapeutas || [])
+      .filter((st: any) => st.terapeutas?.nome)
+      .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes })),
   }))
 
   const stats = calcularStats(sessoes)
   return { sessoes, stats }
+}
+
+export async function listarHorariosPadraoTerapeuta(terapeutaId: string, dataReferencia: string): Promise<{ hora_inicio: string; hora_fim: string }[]> {
+  const supabase = createAdminClient()
+  const d = new Date(dataReferencia + 'T00:00:00')
+  const diaSemana = d.getDay()
+
+  // Busca datas do mesmo dia da semana nas ultimas 4 semanas
+  const datas: string[] = []
+  for (let i = 1; i <= 4; i++) {
+    const dataPassada = new Date(d)
+    dataPassada.setDate(d.getDate() - i * 7)
+    datas.push(formatDateISO(dataPassada))
+  }
+
+  const { data: rows, error } = await supabase
+    .from('sessao_terapeutas')
+    .select('sessoes(hora_inicio, hora_fim, data)')
+    .eq('terapeuta_id', terapeutaId)
+    .in('sessoes.data', datas)
+
+  if (error) throw new Error(error.message)
+
+  const horarios = new Map<string, { hora_inicio: string; hora_fim: string }>()
+  for (const row of rows || []) {
+    const s = (row as any).sessoes
+    if (!s) continue
+    const key = `${s.hora_inicio}|${s.hora_fim}`
+    if (!horarios.has(key)) {
+      horarios.set(key, { hora_inicio: s.hora_inicio, hora_fim: s.hora_fim })
+    }
+  }
+
+  return Array.from(horarios.values()).sort((a, b) => a.hora_inicio.localeCompare(b.hora_fim))
 }
 
 export async function listarEstatisticasGerais(
@@ -571,10 +722,11 @@ function calcularStats(sessoes: { status: string }[]): StatsResumo {
   const atestado = sessoes.filter(s => s.status === 'ATESTADO').length
   const atestadoProfissional = sessoes.filter(s => s.status === 'ATESTADO_PROFISSIONAL').length
   const faltaProfissional = sessoes.filter(s => s.status === 'FALTA_PROFISSIONAL').length
+  const ausenciaProfissional = sessoes.filter(s => s.status === 'AUSENCIA_PROFISSIONAL').length
   const cancelado = sessoes.filter(s => s.status === 'CANCELADO').length
   const taxaComparecimento = total > 0 ? Math.round((presente / total) * 100) : 0
 
-  return { total, presente, falta, faltaJustificada, atestado, atestadoProfissional, faltaProfissional, cancelado, taxaComparecimento }
+  return { total, presente, falta, faltaJustificada, atestado, atestadoProfissional, faltaProfissional, ausenciaProfissional, cancelado, taxaComparecimento }
 }
 
 // ========== BLOQUEIOS ==========
@@ -733,4 +885,54 @@ export async function atualizarStatusTerapeutaSessao(sessaoId: string, terapeuta
     .eq('sessao_id', sessaoId)
     .eq('terapeuta_id', terapeutaId)
   if (error) throw new Error(error.message)
+}
+
+export async function marcarAusenciaProfissional(sessaoId: string, terapeutaId: string, motivo: string): Promise<void> {
+  const supabase = createAdminClient()
+  const observacao = `AUSÊNCIA DO PROFISSIONAL: ${motivo}`
+  const { error } = await supabase
+    .from('sessao_terapeutas')
+    .update({ status: 'FALTA_PROFISSIONAL', observacoes: observacao })
+    .eq('sessao_id', sessaoId)
+    .eq('terapeuta_id', terapeutaId)
+  if (error) throw new Error(error.message)
+}
+
+export async function marcarAusenciaProfissionalDia(terapeutaId: string, data: string, motivo: string): Promise<number> {
+  const supabase = createAdminClient()
+  const observacao = `AUSÊNCIA DO PROFISSIONAL: ${motivo}`
+
+  // Busca todas as sessoes do dia onde o terapeuta participa
+  const { data: stRows, error: stError } = await supabase
+    .from('sessao_terapeutas')
+    .select('sessao_id')
+    .eq('terapeuta_id', terapeutaId)
+
+  if (stError) throw new Error(stError.message)
+  if (!stRows || stRows.length === 0) return 0
+
+  const sessaoIds = stRows.map(r => r.sessao_id)
+
+  // Filtra apenas sessoes da data especificada
+  const { data: sessoesDoDia, error: sError } = await supabase
+    .from('sessoes')
+    .select('id')
+    .eq('data', data)
+    .in('id', sessaoIds)
+
+  if (sError) throw new Error(sError.message)
+  if (!sessoesDoDia || sessoesDoDia.length === 0) return 0
+
+  const idsDoDia = sessoesDoDia.map(s => s.id)
+
+  // Atualiza o status do terapeuta em TODAS as sessoes do dia
+  const { error: updError } = await supabase
+    .from('sessao_terapeutas')
+    .update({ status: 'FALTA_PROFISSIONAL', observacoes: observacao })
+    .eq('terapeuta_id', terapeutaId)
+    .in('sessao_id', idsDoDia)
+
+  if (updError) throw new Error(updError.message)
+
+  return idsDoDia.length
 }

@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react'
 import { Patient, Terapeuta, SessaoHistorico, StatsResumo } from '../actions'
-import { formatDateBRFromISO } from '@/lib/date-helpers'
+import { formatDateBRFromISO, formatDateISO } from '@/lib/date-helpers'
+import { exportarExcel } from '@/lib/export-utils'
+import { extrairMotivoAusencia } from '@/lib/status-helpers'
 
 interface Props {
   pacientes: Patient[]
@@ -20,7 +22,15 @@ const STATUS_COR: Record<string, string> = {
   ATESTADO: 'bg-purple-100 text-purple-700',
   ATESTADO_PROFISSIONAL: 'bg-indigo-100 text-indigo-700',
   FALTA_PROFISSIONAL: 'bg-pink-100 text-pink-700',
+  AUSENCIA_PROFISSIONAL: 'bg-teal-100 text-teal-700',
   CANCELADO: 'bg-gray-100 text-gray-500',
+}
+
+const STATUS_TERAPETA_COR: Record<string, string> = {
+  AGENDADO: 'bg-yellow-50 text-yellow-600 border-yellow-200',
+  PRESENTE: 'bg-green-50 text-green-600 border-green-200',
+  FALTA_PROFISSIONAL: 'bg-pink-50 text-pink-600 border-pink-200',
+  ATESTADO_PROFISSIONAL: 'bg-indigo-50 text-indigo-600 border-indigo-200',
 }
 
 function StatsCards({ stats }: { stats: StatsResumo }) {
@@ -79,11 +89,31 @@ function TabelaHistorico({ sessoes }: { sessoes: SessaoHistorico[] }) {
                     s.paciente_nome || '-'
                   )}
                 </td>
-                <td className="px-4 py-3 text-gray-600 text-xs">{s.terapeutas.join(', ')}</td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-col gap-1">
+                    {s.terapeutas.map(t => {
+                      const motivo = extrairMotivoAusencia(t.observacoes)
+                      return (
+                        <div key={t.nome} className="flex items-center gap-1.5">
+                          <span className="text-xs text-gray-700">{t.nome}</span>
+                          <span className={`inline-block px-1.5 py-0 rounded text-[10px] font-medium border ${STATUS_TERAPETA_COR[t.status] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                            {motivo || t.status.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </td>
                 <td className="px-4 py-3 text-center">
-                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COR[s.status] || 'bg-gray-100 text-gray-600'}`}>
-                    {s.status.replace(/_/g, ' ')}
-                  </span>
+                  {s.paciente_em_avaliacao ? (
+                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                      EM AVALIAÇÃO
+                    </span>
+                  ) : (
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COR[s.status] || 'bg-gray-100 text-gray-600'}`}>
+                      {s.status.replace(/_/g, ' ')}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -256,6 +286,32 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
             {aba === 'paciente' && pacienteSelecionado && `HISTÓRICO DE ${pacienteSelecionado.nome}`}
             {aba === 'terapeuta' && terapeutaSelecionado && `HISTÓRICO DE ${terapeutaSelecionado.nome}`}
             {aba === 'geral' && 'VISÃO GERAL DA CLÍNICA'}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (aba === 'geral') {
+                  exportarExcel(ranking, [
+                    { key: 'nome' as const, header: 'PACIENTE' },
+                    { key: 'total' as const, header: 'TOTAL' },
+                    { key: 'presente' as const, header: 'PRESENTES' },
+                    { key: 'taxa' as const, header: 'TAXA %' },
+                  ], `RELATORIO_GERAL_${dataInicio}_${dataFim}`)
+                } else {
+                  exportarExcel(sessoes, [
+                    { key: 'data' as const, header: 'DATA' },
+                    { key: 'hora_inicio' as const, header: 'INÍCIO' },
+                    { key: 'hora_fim' as const, header: 'FIM' },
+                    { key: 'paciente_nome' as const, header: 'PACIENTE' },
+                    { key: 'status' as const, header: 'STATUS' },
+                  ], `RELATORIO_${aba === 'paciente' ? pacienteSelecionado?.nome : terapeutaSelecionado?.nome}_${dataInicio}_${dataFim}`)
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-sm normal-case"
+            >
+              📊 EXCEL
+            </button>
           </div>
 
           <StatsCards stats={stats} />
