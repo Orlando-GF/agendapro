@@ -9,6 +9,7 @@ export interface Patient {
   em_avaliacao?: boolean | null
   whatsapp_adicionado?: boolean | null
   judicial?: boolean | null
+  laudo?: boolean | null
   observacoes?: string | null
   status_tratamento?: string | null
   motivo_saida?: string | null

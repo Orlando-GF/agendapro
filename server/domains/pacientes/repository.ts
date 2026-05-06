@@ -45,12 +45,12 @@ export async function remove(id: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
-export async function countResumo(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number }> {
+export async function countResumo(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number; comLaudo: number }> {
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('contar_pacientes_resumo')
   if (error) throw new Error(error.message)
   if (!data || data.length === 0) {
-    return { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0 }
+    return { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0, comLaudo: 0 }
   }
   const row = data[0]
   return {
@@ -58,5 +58,6 @@ export async function countResumo(): Promise<{ total: number; emAvaliacao: numbe
     emAvaliacao: Number(row.em_avaliacao),
     judicial: Number(row.judicial),
     semWhatsapp: Number(row.sem_whatsapp),
+    comLaudo: Number(row.com_laudo),
   }
 }

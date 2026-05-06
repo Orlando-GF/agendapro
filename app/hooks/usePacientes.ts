@@ -3,12 +3,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listarPacientesPaginado, contarPacientes, Patient } from '../actions'
 
-export function usePacientes(filtro: string, page: number = 1, limit: number = 50) {
+export function usePacientes(filtro: string, page: number = 1, limit: number = 50, statusTratamento?: string) {
   const queryClient = useQueryClient()
 
   const pacientesQuery = useQuery({
-    queryKey: ['pacientes', 'list', filtro, page, limit],
-    queryFn: () => listarPacientesPaginado(page, limit, filtro || undefined),
+    queryKey: ['pacientes', 'list', filtro, page, limit, statusTratamento],
+    queryFn: () => listarPacientesPaginado(page, limit, filtro || undefined, statusTratamento),
     staleTime: 30_000,
   })
 
@@ -30,7 +30,7 @@ export function usePacientes(filtro: string, page: number = 1, limit: number = 5
     total: pacientesQuery.data?.total ?? 0,
     hasMore: pacientesQuery.data?.hasMore ?? false,
     loading: pacientesQuery.isLoading,
-    stats: statsQuery.data ?? { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0 },
+    stats: statsQuery.data ?? { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0, comLaudo: 0 },
     recarregar,
     page,
   }

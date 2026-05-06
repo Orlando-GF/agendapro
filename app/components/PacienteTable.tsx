@@ -35,6 +35,7 @@ export function PacienteTable({ pacientes, page, hasMore, total, onEditar, onExc
               <th className="px-4 py-3 text-center font-semibold text-gray-700">AVAL.</th>
               <th className="px-4 py-3 text-center font-semibold text-gray-700">WPP</th>
               <th className="px-4 py-3 text-center font-semibold text-gray-700">JUD.</th>
+              <th className="px-4 py-3 text-center font-semibold text-gray-700">LAUDO</th>
               <th className="px-4 py-3 text-center font-semibold text-gray-700">AÇÕES</th>
             </tr>
           </thead>
@@ -83,6 +84,13 @@ export function PacienteTable({ pacientes, page, hasMore, total, onEditar, onExc
                 <td className="px-4 py-3 text-center">
                   {p.judicial ? (
                     <span className="inline-flex w-6 h-6 items-center justify-center rounded-full bg-red-100 text-red-700 text-xs font-bold">⚖</span>
+                  ) : (
+                    <span className="text-gray-300">-</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  {p.laudo ? (
+                    <span className="inline-flex w-6 h-6 items-center justify-center rounded-full bg-purple-100 text-purple-700 text-xs font-bold">L</span>
                   ) : (
                     <span className="text-gray-300">-</span>
                   )}

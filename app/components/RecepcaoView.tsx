@@ -22,6 +22,8 @@ interface Props {
   onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => Promise<void>
   onMarcarAusenciaProfissionalDia?: (terapeutaId: string, data: string, motivo: string) => Promise<number>
   onCancelarDia?: (data: string, motivo: string) => Promise<void>
+  onEditarPaciente?: (pacienteId: string) => void
+  onMarcarTodosPresentes?: (data: string) => Promise<number>
 }
 
 const ACOES = [
@@ -207,15 +209,18 @@ function LinhaSessao({
   onMudarStatus,
   onMudarStatusTerapeuta,
   onMarcarAusenciaProfissional,
+  onEditarPaciente,
 }: {
   s: Sessao
   terapeutasHoje: Terapeuta[]
   onMudarStatus: (id: string, status: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
   onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => void
+  onEditarPaciente?: (pacienteId: string) => void
 }) {
   const cfg = STATUS_CONFIG[s.status] || STATUS_CONFIG.AGENDADO
   const emAvaliacao = s.paciente_em_avaliacao === true
+  const temLaudo = s.paciente_laudo === true
 
   return (
     <tr className="hover:bg-gray-50 group">
@@ -231,13 +236,27 @@ function LinhaSessao({
             <div className="text-[10px] text-gray-500">{s.tipo}</div>
           </div>
         ) : (
-          <div>
-            <div className="font-bold">{s.recorrente ? '↻ ' : ''}{s.paciente_nome}</div>
-            {emAvaliacao && (
-              <span className="inline-block mt-0.5 px-1.5 py-0 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
-                EM AVALIAÇÃO
-              </span>
-            )}
+          <div className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              onClick={() => s.paciente_id && onEditarPaciente?.(s.paciente_id)}
+              className="font-bold text-left hover:text-blue-700 hover:underline underline-offset-2 cursor-pointer disabled:cursor-default disabled:text-gray-900"
+              disabled={!s.paciente_id || !onEditarPaciente}
+            >
+              {s.recorrente ? '↻ ' : ''}{s.paciente_nome}
+            </button>
+            <div className="flex gap-1 flex-wrap">
+              {emAvaliacao && (
+                <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                  EM AVALIAÇÃO
+                </span>
+              )}
+              {temLaudo && (
+                <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-purple-100 text-purple-700 border border-purple-200">
+                  LAUDO
+                </span>
+              )}
+            </div>
           </div>
         )}
       </td>
@@ -277,7 +296,11 @@ function LinhaSessao({
         )}
       </td>
       <td className="px-4 py-3 text-center">
-        {s.tipo === 'VAZIO' ? null : (
+        {s.tipo === 'VAZIO' ? null : emAvaliacao ? (
+          <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+            EM AVALIAÇÃO
+          </span>
+        ) : (
           <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
             {s.status.replace(/_/g, ' ')}
           </span>
@@ -314,12 +337,14 @@ function TabelaSessoes({
   onMudarStatus,
   onMudarStatusTerapeuta,
   onMarcarAusenciaProfissional,
+  onEditarPaciente,
 }: {
   sessoes: Sessao[]
   terapeutasHoje: Terapeuta[]
   onMudarStatus: (id: string, status: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
   onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => void
+  onEditarPaciente?: (pacienteId: string) => void
 }) {
   return (
     <div className="bg-white rounded-lg border overflow-hidden">
@@ -337,7 +362,7 @@ function TabelaSessoes({
           </thead>
           <tbody className="divide-y">
             {sessoes.map(s => (
-              <LinhaSessao key={s.id} s={s} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} />
+              <LinhaSessao key={s.id} s={s} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
             ))}
           </tbody>
         </table>
@@ -361,6 +386,8 @@ export function RecepcaoView({
   onMarcarAusenciaProfissional,
   onMarcarAusenciaProfissionalDia,
   onCancelarDia,
+  onEditarPaciente,
+  onMarcarTodosPresentes,
 }: Props) {
   const dataISO = formatDateISO(dataAtual)
   const diaSemanaHoje = DIAS_SEMANA[dataAtual.getDay()]
@@ -400,6 +427,8 @@ export function RecepcaoView({
   const [motivoDiaNaoFuncionou, setMotivoDiaNaoFuncionou] = useState('')
   const [detalheDiaNaoFuncionou, setDetalheDiaNaoFuncionou] = useState('')
   const [cancelandoDia, setCancelandoDia] = useState(false)
+  const [modalMarcarTodosPresentes, setModalMarcarTodosPresentes] = useState(false)
+  const [marcandoPresentes, setMarcandoPresentes] = useState(false)
 
   const sessoesOnly = useMemo(() => sessoes.filter(s => s.tipo === 'SESSAO'), [sessoes])
 
@@ -655,17 +684,25 @@ export function RecepcaoView({
           </div>
         </div>
 
-        {/* Botão Dia Não Funcionou */}
-        {onCancelarDia && sessoesOnly.filter(s => s.status === 'AGENDADO').length > 0 && (
-          <div className="flex justify-end">
+        {/* Ações em lote do dia */}
+        <div className="flex justify-end gap-2">
+          {onMarcarTodosPresentes && sessoesOnly.length > 0 && (
+            <button
+              onClick={() => setModalMarcarTodosPresentes(true)}
+              className="px-3 py-1.5 rounded-lg border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 font-medium text-sm normal-case"
+            >
+              ✓ MARCAR TODOS PRESENTES
+            </button>
+          )}
+          {onCancelarDia && sessoesOnly.filter(s => s.status === 'AGENDADO').length > 0 && (
             <button
               onClick={() => setModalDiaNaoFuncionou(true)}
               className="px-3 py-1.5 rounded-lg border border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100 font-medium text-sm normal-case"
             >
               DIA NÃO FUNCIONOU
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
         {modalDiaNaoFuncionou && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -730,6 +767,48 @@ export function RecepcaoView({
           </div>
         )}
 
+        {/* Modal Marcar Todos Presentes */}
+        {modalMarcarTodosPresentes && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg border p-6 w-full max-w-sm space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900">Marcar Todos Presentes</h3>
+              <p className="text-sm text-gray-600">
+                Todos os terapeutas de todas as sessões de {formatDateBR(dataAtual)} serão marcados como <strong>PRESENTE</strong>.
+              </p>
+              <p className="text-xs text-gray-500">
+                Terapeutas com ausência ou outro status não serão alterados.
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setModalMarcarTodosPresentes(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium normal-case"
+                >
+                  CANCELAR
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!onMarcarTodosPresentes) return
+                    setMarcandoPresentes(true)
+                    try {
+                      const qtd = await onMarcarTodosPresentes(dataISO)
+                      success(`${qtd} terapeutas marcados como presente`)
+                    } catch (err: any) {
+                      error(err.message || 'Erro ao marcar presentes')
+                    } finally {
+                      setMarcandoPresentes(false)
+                      setModalMarcarTodosPresentes(false)
+                    }
+                  }}
+                  disabled={marcandoPresentes}
+                  className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 font-medium disabled:opacity-50 normal-case"
+                >
+                  {marcandoPresentes ? 'MARCANDO...' : 'CONFIRMAR'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {sessoes.length === 0 ? (
           <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
             NENHUMA SESSÃO PARA {formatDateBR(dataAtual).toUpperCase()}.
@@ -756,7 +835,7 @@ export function RecepcaoView({
               </div>
             </div>
 
-            <TabelaSessoes sessoes={sessoes} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} />
+            <TabelaSessoes sessoes={sessoes} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
           </>
         ) : (
           <>
@@ -783,13 +862,21 @@ export function RecepcaoView({
                               <span className={`font-semibold ${inativo ? 'text-red-600 line-through' : 'text-gray-900'}`}>
                                 {t.nome}
                               </span>
-                              {inativo && (
+                              {inativo ? (
                                 <span className="px-1 py-0 rounded text-[9px] font-medium bg-red-100 text-red-700 border border-red-200">INATIVO</span>
-                              )}
-                              {temExcecao && stCfg && (
-                                <span className={`px-1.5 py-0 rounded text-[9px] font-medium border ${stCfg.cor}`}>
-                                  {motivo || stCfg.label}
-                                </span>
+                              ) : (
+                                <>
+                                  {t.status === 'PRESENTE' && (
+                                    <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-green-100 text-green-700 border border-green-200">
+                                      PRESENTE
+                                    </span>
+                                  )}
+                                  {temExcecao && stCfg && (
+                                    <span className={`px-1.5 py-0 rounded text-[9px] font-medium border ${stCfg.cor}`}>
+                                      {motivo || stCfg.label}
+                                    </span>
+                                  )}
+                                </>
                               )}
                               <MenuTerapeutaStatus
                                 sessaoId={lista.find(s => s.tipo === 'SESSAO')?.id || lista[0]?.id || ''}
@@ -835,13 +922,27 @@ export function RecepcaoView({
                                       <div className="text-[10px] text-gray-500">{s.tipo}</div>
                                     </div>
                                   ) : (
-                                    <div>
-                                      <div className="font-bold">{s.recorrente ? '↻ ' : ''}{s.paciente_nome}</div>
-                                      {emAvaliacao && (
-                                        <span className="inline-block mt-0.5 px-1.5 py-0 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
-                                          EM AVALIAÇÃO
-                                        </span>
-                                      )}
+                                    <div className="flex flex-col gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => s.paciente_id && onEditarPaciente?.(s.paciente_id)}
+                                        className="font-bold text-left hover:text-blue-700 hover:underline underline-offset-2 cursor-pointer disabled:cursor-default disabled:text-gray-900"
+                                        disabled={!s.paciente_id || !onEditarPaciente}
+                                      >
+                                        {s.recorrente ? '↻ ' : ''}{s.paciente_nome}
+                                      </button>
+                                      <div className="flex gap-1 flex-wrap">
+                                        {emAvaliacao && (
+                                          <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                            EM AVALIAÇÃO
+                                          </span>
+                                        )}
+                                        {s.paciente_laudo === true && (
+                                          <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-purple-100 text-purple-700 border border-purple-200">
+                                            LAUDO
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   )}
                                 </td>
@@ -849,9 +950,15 @@ export function RecepcaoView({
                                   {s.tipo === 'SESSAO' ? (s.paciente_codigo || '-') : ''}
                                 </td>
                                 <td className="px-4 py-3 text-center">
-                                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
-                                    {s.status.replace(/_/g, ' ')}
-                                  </span>
+                                  {emAvaliacao ? (
+                                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                      EM AVALIAÇÃO
+                                    </span>
+                                  ) : (
+                                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
+                                      {s.status.replace(/_/g, ' ')}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="px-4 py-3">
                                   <div className="flex justify-center gap-1 flex-wrap">

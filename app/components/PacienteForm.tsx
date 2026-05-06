@@ -33,6 +33,7 @@ function buildDefaults(paciente: Patient | null | undefined): PatientInput & { i
       em_avaliacao: paciente.em_avaliacao ?? false,
       whatsapp_adicionado: paciente.whatsapp_adicionado ?? false,
       judicial: paciente.judicial ?? false,
+      laudo: paciente.laudo ?? false,
       observacoes: paciente.observacoes ?? null,
       status_tratamento: (paciente.status_tratamento as any) ?? 'EM_TRATAMENTO',
       motivo_saida: paciente.motivo_saida ?? null,
@@ -49,6 +50,7 @@ function buildDefaults(paciente: Patient | null | undefined): PatientInput & { i
     em_avaliacao: false,
     whatsapp_adicionado: false,
     judicial: false,
+    laudo: false,
     observacoes: null,
     status_tratamento: 'EM_TRATAMENTO',
     motivo_saida: null,
@@ -213,6 +215,14 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
                 className="w-5 h-5 rounded border-gray-300 text-red-600 focus:ring-red-500"
               />
               <span className="text-sm font-medium text-gray-700">JUDICIAL</span>
+            </label>
+            <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
+              <input
+                type="checkbox"
+                {...register('laudo')}
+                className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+              />
+              <span className="text-sm font-medium text-gray-700">LAUDO</span>
             </label>
           </div>
         </div>

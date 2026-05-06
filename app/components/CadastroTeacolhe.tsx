@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import {
-  listarPacientes, salvarPaciente, excluirPaciente, contarPacientes,
+  listarPacientes, salvarPaciente, excluirPaciente, contarPacientes, buscarPacientePorId,
   listarTerapeutas, salvarTerapeuta, excluirTerapeuta,
   listarEspecialidades, salvarEspecialidade, excluirEspecialidade,
   listarHorarios, salvarHorario, excluirHorario,
-  listarSessoes, salvarSessao, excluirSessao, atualizarStatusSessao, atualizarStatusTerapeutaSessao, marcarAusenciaProfissional, marcarAusenciaProfissionalDia, moverSessao, cancelarSessoesDoDia,
+  listarSessoes, salvarSessao, excluirSessao, atualizarStatusSessao, atualizarStatusTerapeutaSessao, marcarAusenciaProfissional, marcarAusenciaProfissionalDia, marcarTodosPresentesDia, contarSessoesFuturasDoPaciente, cancelarSessoesFuturasDoPaciente, moverSessao, cancelarSessoesDoDia,
   listarBloqueios, criarBloqueio, excluirBloqueio,
   listarAusencias, salvarAusencia, excluirAusencia,
   listarHistoricoPaciente, listarHistoricoTerapeuta, listarEstatisticasGerais,
@@ -100,7 +100,8 @@ function CadastroTeacolheInner({
   // Pacientes
   const [filtroPacientes, setFiltroPacientes] = useState('')
   const [paginaPacientes, setPaginaPacientes] = useState(1)
-  const { pacientes, loading: loadingPacientes, stats, hasMore, total: totalPacientes, recarregar: recarregarPacientes } = usePacientes(filtroPacientes, paginaPacientes)
+  const [statusTratamentoFiltro, setStatusTratamentoFiltro] = useState<string>('')
+  const { pacientes, loading: loadingPacientes, stats, hasMore, total: totalPacientes, recarregar: recarregarPacientes } = usePacientes(filtroPacientes, paginaPacientes, 50, statusTratamentoFiltro || undefined)
   const [pacienteEdicao, setPacienteEdicao] = useState<Patient | null>(null)
 
   // Terapeutas
@@ -137,7 +138,13 @@ function CadastroTeacolheInner({
   // Loading global para ações (salvar/excluir)
   const [submitting, setSubmitting] = useState(false)
 
-
+  // Modal de confirmação para cancelar sessões futuras
+  const [modalCancelarSessoes, setModalCancelarSessoes] = useState<{
+    aberto: boolean
+    dados: PatientFormData | null
+    qtdSessoes: number
+    cancelar: boolean
+  }>({ aberto: false, dados: null, qtdSessoes: 0, cancelar: false })
 
   const abrirForm = (tipo: FormType, item?: any) => {
     setFormType(tipo)
@@ -181,10 +188,14 @@ function CadastroTeacolheInner({
     setAusencias(a)
   }
 
-  const handleSalvarPaciente = async (dados: PatientFormData) => {
+  const handleSalvarPaciente = async (dados: PatientFormData, deveCancelarSessoes?: boolean) => {
     setSubmitting(true)
     try {
       await salvarPaciente(dados)
+      if (deveCancelarSessoes && dados.id) {
+        const qtd = await cancelarSessoesFuturasDoPaciente(dados.id)
+        if (qtd > 0) success(`${qtd} sessões futuras canceladas`)
+      }
       fecharForm()
       await recarregarView()
     } catch (err: any) {
@@ -192,6 +203,19 @@ function CadastroTeacolheInner({
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const verificarESalvarPaciente = async (dados: PatientFormData) => {
+    // Se paciente saiu do tratamento e tem ID, verifica sessoes futuras antes
+    if (dados.id && dados.status_tratamento && dados.status_tratamento !== 'EM_TRATAMENTO') {
+      const qtd = await contarSessoesFuturasDoPaciente(dados.id)
+      if (qtd > 0) {
+        setModalCancelarSessoes({ aberto: true, dados, qtdSessoes: qtd, cancelar: true })
+        return
+      }
+    }
+    // Caso contrario, salva normalmente
+    await handleSalvarPaciente(dados, false)
   }
 
   const handleSalvarTerapeuta = async (dados: TerapeutaFormData) => {
@@ -246,6 +270,17 @@ function CadastroTeacolheInner({
     }
   }
 
+  const handleEditarPaciente = async (id: string) => {
+    const encontrado = pacientes.find(p => p.id === id)
+    if (encontrado) {
+      abrirForm('paciente', encontrado)
+    } else {
+      const p = await buscarPacientePorId(id)
+      if (p) abrirForm('paciente', p)
+      else toastError('Paciente não encontrado')
+    }
+  }
+
   const handleMudarStatusSessao = async (id: string, status: string) => {
     setSubmitting(true)
     try {
@@ -291,6 +326,22 @@ function CadastroTeacolheInner({
       const qtd = await marcarAusenciaProfissionalDia(terapeutaId, data, motivo)
       success(`${qtd} sessões marcadas com ausência`)
       await recarregarView()
+      return qtd
+    } catch (err: any) {
+      toastError(err.message)
+      throw err
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleMarcarTodosPresentes = async (data: string) => {
+    setSubmitting(true)
+    try {
+      const qtd = await marcarTodosPresentesDia(data)
+      success(`${qtd} terapeutas marcados como presente`)
+      await recarregarRecepcao()
+      await recarregarAgenda()
       return qtd
     } catch (err: any) {
       toastError(err.message)
@@ -475,10 +526,29 @@ function CadastroTeacolheInner({
 
           {view === 'pacientes' && (
             <>
-              <StatsCards total={stats.total} emAvaliacao={stats.emAvaliacao} judicial={stats.judicial} semWhatsapp={stats.semWhatsapp} />
-              <div className="mb-4 flex gap-3 items-center">
-                <input type="text" placeholder="Buscar por nome ou prontuário..." value={filtroPacientes} onChange={e => setFiltroPacientes(e.target.value)} className="flex-1 max-w-md rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                {loadingPacientes && <span className="text-sm text-gray-500">Carregando...</span>}
+              <StatsCards total={stats.total} emAvaliacao={stats.emAvaliacao} judicial={stats.judicial} semWhatsapp={stats.semWhatsapp} comLaudo={stats.comLaudo} />
+              <div className="mb-4 flex flex-col gap-3">
+                <div className="flex gap-3 items-center">
+                  <input type="text" placeholder="Buscar por nome ou prontuário..." value={filtroPacientes} onChange={e => { setFiltroPacientes(e.target.value); setPaginaPacientes(1) }} className="flex-1 max-w-md rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {loadingPacientes && <span className="text-sm text-gray-500">Carregando...</span>}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {[
+                    { key: '', label: 'TODOS', cor: 'bg-gray-100 text-gray-700 border-gray-300' },
+                    { key: 'EM_TRATAMENTO', label: 'EM TRATAMENTO', cor: 'bg-green-100 text-green-700 border-green-200' },
+                    { key: 'ALTA', label: 'ALTA', cor: 'bg-blue-100 text-blue-700 border-blue-200' },
+                    { key: 'DESISTIU', label: 'DESISTIU', cor: 'bg-red-100 text-red-700 border-red-200' },
+                    { key: 'MUDANCA', label: 'MUDANÇA', cor: 'bg-orange-100 text-orange-700 border-orange-200' },
+                  ].map(f => (
+                    <button
+                      key={f.key}
+                      onClick={() => { setStatusTratamentoFiltro(f.key); setPaginaPacientes(1) }}
+                      className={`px-3 py-1 rounded-lg border text-xs font-medium normal-case transition-colors ${statusTratamentoFiltro === f.key ? f.cor + ' ring-1 ring-offset-1 ring-blue-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <PacienteTable pacientes={pacientes} page={paginaPacientes} hasMore={hasMore} total={totalPacientes} onEditar={p => abrirForm('paciente', p)} onExcluir={id => handleExcluir('paciente', id)} onMudarPagina={setPaginaPacientes} />
             </>
@@ -508,7 +578,7 @@ function CadastroTeacolheInner({
           {view === 'recepcao' && (
             <>
               {loadingRecepcao && <span className="text-sm text-gray-500 mb-2 block">Carregando...</span>}
-              <RecepcaoView sessoes={sessoesHoje} terapeutas={terapeutas} horarios={horarios} ausencias={ausenciasRecepcao} bloqueios={bloqueiosRecepcao} horariosPadrao={horariosPadrao} dataAtual={dataRecepcao} terapeutaFiltro={terapeutaFiltro} onMudarData={setDataRecepcao} onMudarStatus={handleMudarStatusSessao} onMudarStatusTerapeuta={handleMudarStatusTerapeuta} onMarcarAusenciaProfissional={handleMarcarAusenciaProfissional} onMarcarAusenciaProfissionalDia={handleMarcarAusenciaProfissionalDia} onCancelarDia={handleCancelarDia} />
+              <RecepcaoView sessoes={sessoesHoje} terapeutas={terapeutas} horarios={horarios} ausencias={ausenciasRecepcao} bloqueios={bloqueiosRecepcao} horariosPadrao={horariosPadrao} dataAtual={dataRecepcao} terapeutaFiltro={terapeutaFiltro} onMudarData={setDataRecepcao} onMudarStatus={handleMudarStatusSessao} onMudarStatusTerapeuta={handleMudarStatusTerapeuta} onMarcarAusenciaProfissional={handleMarcarAusenciaProfissional} onMarcarAusenciaProfissionalDia={handleMarcarAusenciaProfissionalDia} onCancelarDia={handleCancelarDia} onEditarPaciente={handleEditarPaciente} onMarcarTodosPresentes={handleMarcarTodosPresentes} />
             </>
           )}
 
@@ -519,13 +589,14 @@ function CadastroTeacolheInner({
               onBuscarPaciente={listarHistoricoPaciente}
               onBuscarTerapeuta={listarHistoricoTerapeuta}
               onBuscarGeral={listarEstatisticasGerais}
+              onBuscarPacientes={listarPacientes}
             />
           )}
         </div>
       </main>
 
       {sidepanelAberto && formType === 'paciente' && (
-        <PacienteForm key={pacienteEdicao?.id || 'novo'} paciente={pacienteEdicao} onSalvar={handleSalvarPaciente} onCancelar={fecharForm} />
+        <PacienteForm key={pacienteEdicao?.id || 'novo'} paciente={pacienteEdicao} onSalvar={verificarESalvarPaciente} onCancelar={fecharForm} />
       )}
       {sidepanelAberto && formType === 'terapeuta' && (
         <TerapeutaForm terapeuta={terapeutaEdicao} especialidades={especialidades} ausencias={ausencias} onSalvar={handleSalvarTerapeuta} onSalvarAusencia={async (d) => { await salvarAusencia(d); await listarAusencias().then(setAusencias) }} onExcluirAusencia={async (id) => { await excluirAusencia(id); setAusencias(prev => prev.filter(a => a.id !== id)) }} onCancelar={fecharForm} />
@@ -549,6 +620,51 @@ function CadastroTeacolheInner({
           onSalvar={handleSalvarSessao}
           onCancelar={fecharForm}
         />
+      )}
+
+      {/* Modal de confirmação: cancelar sessões futuras */}
+      {modalCancelarSessoes.aberto && modalCancelarSessoes.dados && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000]">
+          <div className="bg-white rounded-lg border p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900">Alterar Status do Tratamento</h3>
+            <p className="text-sm text-gray-600">
+              Este paciente tem <strong>{modalCancelarSessoes.qtdSessoes}</strong> sessão{modalCancelarSessoes.qtdSessoes > 1 ? 's' : ''} agendada{modalCancelarSessoes.qtdSessoes > 1 ? 's' : ''} para datas futuras.
+            </p>
+            <p className="text-sm text-gray-600">
+              Deseja <strong>cancelar</strong> essas sessões futuras ou <strong>manter</strong> os agendamentos?
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setModalCancelarSessoes({ aberto: false, dados: null, qtdSessoes: 0, cancelar: false })
+                }}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium normal-case"
+              >
+                VOLTAR
+              </button>
+              <button
+                onClick={async () => {
+                  const dados = modalCancelarSessoes.dados!
+                  setModalCancelarSessoes({ aberto: false, dados: null, qtdSessoes: 0, cancelar: false })
+                  await handleSalvarPaciente(dados, false)
+                }}
+                className="px-4 py-2 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium normal-case"
+              >
+                MANTER AGENDAMENTOS
+              </button>
+              <button
+                onClick={async () => {
+                  const dados = modalCancelarSessoes.dados!
+                  setModalCancelarSessoes({ aberto: false, dados: null, qtdSessoes: 0, cancelar: false })
+                  await handleSalvarPaciente(dados, true)
+                }}
+                className="px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 font-medium normal-case"
+              >
+                CANCELAR SESSÕES
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

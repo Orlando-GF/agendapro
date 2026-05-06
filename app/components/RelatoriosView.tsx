@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 import { Patient, Terapeuta, SessaoHistorico, StatsResumo } from '../actions'
 import { formatDateBRFromISO, formatDateISO } from '@/lib/date-helpers'
 import { exportarExcel } from '@/lib/export-utils'
@@ -12,6 +12,7 @@ interface Props {
   onBuscarPaciente: (pacienteId: string, dataInicio: string, dataFim: string) => Promise<{ sessoes: SessaoHistorico[]; stats: StatsResumo }>
   onBuscarTerapeuta: (terapeutaId: string, dataInicio: string, dataFim: string) => Promise<{ sessoes: SessaoHistorico[]; stats: StatsResumo }>
   onBuscarGeral: (dataInicio: string, dataFim: string) => Promise<{ stats: StatsResumo; porPaciente: { paciente_id: string; nome: string; total: number; presente: number; taxa: number }[] }>
+  onBuscarPacientes?: (filtro: string) => Promise<Patient[]>
 }
 
 const STATUS_COR: Record<string, string> = {
@@ -24,6 +25,7 @@ const STATUS_COR: Record<string, string> = {
   FALTA_PROFISSIONAL: 'bg-pink-100 text-pink-700',
   AUSENCIA_PROFISSIONAL: 'bg-teal-100 text-teal-700',
   CANCELADO: 'bg-gray-100 text-gray-500',
+  FERIADO: 'bg-orange-50 text-orange-600 border-orange-200',
 }
 
 const STATUS_TERAPETA_COR: Record<string, string> = {
@@ -93,19 +95,32 @@ function TabelaHistorico({ sessoes }: { sessoes: SessaoHistorico[] }) {
                   <div className="flex flex-col gap-1">
                     {s.terapeutas.map(t => {
                       const motivo = extrairMotivoAusencia(t.observacoes)
+                      const inativo = t.ativo === false
                       return (
                         <div key={t.nome} className="flex items-center gap-1.5">
-                          <span className="text-xs text-gray-700">{t.nome}</span>
-                          <span className={`inline-block px-1.5 py-0 rounded text-[10px] font-medium border ${STATUS_TERAPETA_COR[t.status] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                            {motivo || t.status.replace(/_/g, ' ')}
+                          <span className={`text-xs ${inativo ? 'text-red-500 line-through' : 'text-gray-700'}`}>
+                            {t.nome}
                           </span>
+                          {inativo ? (
+                            <span className="inline-block px-1.5 py-0 rounded text-[10px] font-medium bg-red-100 text-red-700 border border-red-200">
+                              INATIVO
+                            </span>
+                          ) : (
+                            <span className={`inline-block px-1.5 py-0 rounded text-[10px] font-medium border ${STATUS_TERAPETA_COR[t.status] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                              {motivo || t.status.replace(/_/g, ' ')}
+                            </span>
+                          )}
                         </div>
                       )
                     })}
                   </div>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  {s.paciente_em_avaliacao ? (
+                  {s.isDiaNaoFuncionou ? (
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${STATUS_COR.FERIADO}`}>
+                      FERIADO
+                    </span>
+                  ) : s.paciente_em_avaliacao ? (
                     <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
                       EM AVALIAÇÃO
                     </span>
@@ -143,9 +158,10 @@ function formatDateLocal(d: Date): string {
   return `${ano}-${mes}-${dia}`
 }
 
-export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBuscarTerapeuta, onBuscarGeral }: Props) {
+export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBuscarTerapeuta, onBuscarGeral, onBuscarPacientes }: Props) {
   const [aba, setAba] = useState<'paciente' | 'terapeuta' | 'geral'>('paciente')
   const [pacienteId, setPacienteId] = useState('')
+  const [pacienteNome, setPacienteNome] = useState('')
   const [terapeutaId, setTerapeutaId] = useState('')
   const [dataInicio, setDataInicio] = useState(getPeriodoPadrao().inicio)
   const [dataFim, setDataFim] = useState(getPeriodoPadrao().fim)
@@ -153,6 +169,22 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
   const [sessoes, setSessoes] = useState<SessaoHistorico[]>([])
   const [stats, setStats] = useState<StatsResumo | null>(null)
   const [ranking, setRanking] = useState<{ paciente_id: string; nome: string; total: number; presente: number; taxa: number }[]>([])
+
+  // Busca autocomplete de pacientes
+  const [sugestoesPacientes, setSugestoesPacientes] = useState<Patient[]>([])
+  const [buscandoPacientes, setBuscandoPacientes] = useState(false)
+  const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
+  const refAutocomplete = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (refAutocomplete.current && !refAutocomplete.current.contains(e.target as Node)) {
+        setMostrarSugestoes(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const buscarPaciente = async () => {
     if (!pacienteId) return
@@ -165,6 +197,31 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleBuscarPacientes = async (termo: string) => {
+    setPacienteNome(termo)
+    setPacienteId('')
+    if (!termo.trim() || !onBuscarPacientes) {
+      setSugestoesPacientes([])
+      setMostrarSugestoes(false)
+      return
+    }
+    setBuscandoPacientes(true)
+    try {
+      const res = await onBuscarPacientes(termo.trim())
+      setSugestoesPacientes(res)
+      setMostrarSugestoes(true)
+    } finally {
+      setBuscandoPacientes(false)
+    }
+  }
+
+  const handleSelecionarPaciente = (p: Patient) => {
+    setPacienteId(p.id)
+    setPacienteNome(p.nome)
+    setSugestoesPacientes([])
+    setMostrarSugestoes(false)
   }
 
   const buscarTerapeuta = async () => {
@@ -192,7 +249,7 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
     }
   }
 
-  const pacienteSelecionado = pacientes.find(p => p.id === pacienteId)
+  const pacienteSelecionado = pacientes.find(p => p.id === pacienteId) || sugestoesPacientes.find(p => p.id === pacienteId)
   const terapeutaSelecionado = terapeutas.find(t => t.id === terapeutaId)
 
   return (
@@ -218,18 +275,39 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
       <div className="bg-white rounded-lg border p-4 space-y-3">
         <div className="flex items-end gap-3 flex-wrap">
           {aba === 'paciente' && (
-            <div className="flex-1 min-w-[200px]">
+            <div className="flex-1 min-w-[200px] relative" ref={refAutocomplete}>
               <label className="block text-sm font-medium text-gray-700 mb-1">PACIENTE</label>
-              <select
-                value={pacienteId}
-                onChange={e => setPacienteId(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Selecione...</option>
-                {pacientes.map(p => (
-                  <option key={p.id} value={p.id}>{p.nome}</option>
-                ))}
-              </select>
+              <input
+                type="text"
+                value={pacienteNome}
+                onChange={e => handleBuscarPacientes(e.target.value)}
+                onFocus={() => { if (sugestoesPacientes.length > 0) setMostrarSugestoes(true) }}
+                placeholder="Digite nome ou prontuário..."
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {buscandoPacientes && (
+                <div className="absolute right-3 top-[30px] text-xs text-gray-400">buscando...</div>
+              )}
+              {mostrarSugestoes && sugestoesPacientes.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  {sugestoesPacientes.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleSelecionarPaciente(p)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b last:border-b-0"
+                    >
+                      <div className="font-medium text-gray-900">{p.nome}</div>
+                      <div className="text-xs text-gray-500">{p.codigo || 'Sem prontuário'}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {mostrarSugestoes && pacienteNome.trim() && !buscandoPacientes && sugestoesPacientes.length === 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg px-3 py-2 text-sm text-gray-500">
+                  Nenhum paciente encontrado.
+                </div>
+              )}
             </div>
           )}
 

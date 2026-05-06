@@ -17,6 +17,7 @@ export interface Patient {
   em_avaliacao?: boolean | null
   whatsapp_adicionado?: boolean | null
   judicial?: boolean | null
+  laudo?: boolean | null
   observacoes?: string | null
   status_tratamento?: string | null
   motivo_saida?: string | null
@@ -36,6 +37,7 @@ export interface PatientFormData {
   em_avaliacao?: boolean | null
   whatsapp_adicionado?: boolean | null
   judicial?: boolean | null
+  laudo?: boolean | null
   observacoes?: string | null
   status_tratamento?: string | null
   motivo_saida?: string | null
@@ -106,6 +108,7 @@ export interface Sessao {
   paciente_nome?: string
   paciente_codigo?: string | null
   paciente_em_avaliacao?: boolean | null
+  paciente_laudo?: boolean | null
   data: string
   hora_inicio: string
   hora_fim: string
@@ -160,7 +163,8 @@ export async function listarPacientes(filtro?: string): Promise<Patient[]> {
 export async function listarPacientesPaginado(
   page: number = 1,
   limit: number = 50,
-  filtro?: string
+  filtro?: string,
+  statusTratamento?: string
 ): Promise<{ data: Patient[]; total: number; hasMore: boolean }> {
   const supabase = await createClient()
   const from = (page - 1) * limit
@@ -175,6 +179,10 @@ export async function listarPacientesPaginado(
   if (filtro) {
     const term = `%${filtro}%`
     query = query.or(`nome.ilike.${term},codigo.ilike.${term}`)
+  }
+
+  if (statusTratamento) {
+    query = query.eq('status_tratamento', statusTratamento)
   }
 
   const { data: rows, error, count } = await query
@@ -199,6 +207,7 @@ export async function salvarPaciente(dados: PatientFormData): Promise<Patient> {
     em_avaliacao: dados.em_avaliacao ?? false,
     whatsapp_adicionado: dados.whatsapp_adicionado ?? false,
     judicial: dados.judicial ?? false,
+    laudo: dados.laudo ?? false,
     observacoes: toUpper(dados.observacoes),
     status_tratamento: dados.status_tratamento ?? 'EM_TRATAMENTO',
     motivo_saida: toUpper(dados.motivo_saida),
@@ -221,12 +230,19 @@ export async function excluirPaciente(id: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
-export async function dashboardStats(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number }> {
+export async function buscarPacientePorId(id: string): Promise<Patient | null> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.from('patients').select('*').eq('id', id).single()
+  if (error) return null
+  return data as Patient
+}
+
+export async function dashboardStats(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number; comLaudo: number }> {
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('dashboard_stats')
   if (error) throw new Error(error.message)
   if (!data || data.length === 0) {
-    return { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0 }
+    return { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0, comLaudo: 0 }
   }
   const row = data[0]
   return {
@@ -234,15 +250,16 @@ export async function dashboardStats(): Promise<{ total: number; emAvaliacao: nu
     emAvaliacao: Number(row.em_avaliacao),
     judicial: Number(row.judicial),
     semWhatsapp: Number(row.sem_whatsapp),
+    comLaudo: Number(row.com_laudo),
   }
 }
 
-export async function contarPacientes(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number }> {
+export async function contarPacientes(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number; comLaudo: number }> {
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('contar_pacientes_resumo')
   if (error) throw new Error(error.message)
   if (!data || data.length === 0) {
-    return { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0 }
+    return { total: 0, emAvaliacao: 0, judicial: 0, semWhatsapp: 0, comLaudo: 0 }
   }
   const row = data[0]
   return {
@@ -250,6 +267,7 @@ export async function contarPacientes(): Promise<{ total: number; emAvaliacao: n
     emAvaliacao: Number(row.em_avaliacao),
     judicial: Number(row.judicial),
     semWhatsapp: Number(row.sem_whatsapp),
+    comLaudo: Number(row.com_laudo),
   }
 }
 
@@ -375,6 +393,7 @@ export async function listarSessoes(dataInicio: string, dataFim: string): Promis
     paciente_nome: row.paciente_nome,
     paciente_codigo: row.paciente_codigo,
     paciente_em_avaliacao: row.paciente_em_avaliacao,
+    paciente_laudo: row.paciente_laudo,
     data: row.data,
     hora_inicio: row.hora_inicio,
     hora_fim: row.hora_fim,
@@ -406,6 +425,7 @@ export async function agendaSemana(dataInicio: string, dataFim: string): Promise
     paciente_nome: row.paciente_nome,
     paciente_codigo: row.paciente_codigo,
     paciente_em_avaliacao: row.paciente_em_avaliacao,
+    paciente_laudo: row.paciente_laudo,
     data: row.data,
     hora_inicio: row.hora_inicio,
     hora_fim: row.hora_fim,
@@ -434,6 +454,7 @@ export async function recepcaoDia(dataParam: string): Promise<Sessao[]> {
     paciente_nome: row.paciente_nome,
     paciente_codigo: row.paciente_codigo,
     paciente_em_avaliacao: row.paciente_em_avaliacao,
+    paciente_laudo: row.paciente_laudo,
     data: row.data,
     hora_inicio: row.hora_inicio,
     hora_fim: row.hora_fim,
@@ -532,7 +553,8 @@ export interface SessaoHistorico {
   titulo?: string | null
   paciente_nome?: string | null
   paciente_em_avaliacao?: boolean | null
-  terapeutas: { nome: string; status: string; observacoes?: string | null }[]
+  isDiaNaoFuncionou?: boolean
+  terapeutas: { nome: string; status: string; observacoes?: string | null; ativo?: boolean | null }[]
 }
 
 export interface StatsResumo {
@@ -557,7 +579,7 @@ export async function listarHistoricoPaciente(
 
   const { data: rows, error } = await supabase
     .from('sessoes')
-    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome), status, observacoes)')
+    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome, ativo), status, observacoes)')
     .eq('paciente_id', pacienteId)
     .gte('data', dataInicio)
     .lte('data', dataFim)
@@ -565,20 +587,25 @@ export async function listarHistoricoPaciente(
 
   if (error) throw new Error(error.message)
 
-  const sessoes: SessaoHistorico[] = (rows || []).map((row: any) => ({
-    id: row.id,
-    data: row.data,
-    hora_inicio: row.hora_inicio,
-    hora_fim: row.hora_fim,
-    status: row.status,
-    tipo: row.tipo,
-    titulo: row.titulo,
-    paciente_nome: row.patients?.nome || null,
-    paciente_em_avaliacao: row.patients?.em_avaliacao || null,
-    terapeutas: (row.sessao_terapeutas || [])
-      .filter((st: any) => st.terapeutas?.nome)
-      .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes })),
-  }))
+  const sessoes: SessaoHistorico[] = (rows || []).map((row: any) => {
+    const pacienteArr = Array.isArray(row.patients) ? row.patients : row.patients ? [row.patients] : []
+    const paciente = pacienteArr[0] || null
+    return {
+      id: row.id,
+      data: row.data,
+      hora_inicio: row.hora_inicio,
+      hora_fim: row.hora_fim,
+      status: row.status,
+      tipo: row.tipo,
+      titulo: row.titulo,
+      paciente_nome: paciente?.nome || null,
+      paciente_em_avaliacao: paciente?.em_avaliacao || null,
+      isDiaNaoFuncionou: row.status === 'CANCELADO' && typeof row.observacoes === 'string' && row.observacoes.startsWith('DIA NAO FUNCIONOU'),
+      terapeutas: (row.sessao_terapeutas || [])
+        .filter((st: any) => st.terapeutas?.nome)
+        .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes, ativo: st.terapeutas?.ativo ?? true })),
+    }
+  })
 
   const stats = calcularStats(sessoes)
   return { sessoes, stats }
@@ -604,7 +631,7 @@ export async function listarHistoricoTerapeuta(
 
   const { data: rows, error } = await supabase
     .from('sessoes')
-    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome), status, observacoes)')
+    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, observacoes, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome, ativo), status, observacoes)')
     .in('id', sessaoIds)
     .gte('data', dataInicio)
     .lte('data', dataFim)
@@ -612,20 +639,25 @@ export async function listarHistoricoTerapeuta(
 
   if (error) throw new Error(error.message)
 
-  const sessoes: SessaoHistorico[] = (rows || []).map((row: any) => ({
-    id: row.id,
-    data: row.data,
-    hora_inicio: row.hora_inicio,
-    hora_fim: row.hora_fim,
-    status: row.status,
-    tipo: row.tipo,
-    titulo: row.titulo,
-    paciente_nome: row.patients?.nome || null,
-    paciente_em_avaliacao: row.patients?.em_avaliacao || null,
-    terapeutas: (row.sessao_terapeutas || [])
-      .filter((st: any) => st.terapeutas?.nome)
-      .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes })),
-  }))
+  const sessoes: SessaoHistorico[] = (rows || []).map((row: any) => {
+    const pacienteArr = Array.isArray(row.patients) ? row.patients : row.patients ? [row.patients] : []
+    const paciente = pacienteArr[0] || null
+    return {
+      id: row.id,
+      data: row.data,
+      hora_inicio: row.hora_inicio,
+      hora_fim: row.hora_fim,
+      status: row.status,
+      tipo: row.tipo,
+      titulo: row.titulo,
+      paciente_nome: paciente?.nome || null,
+      paciente_em_avaliacao: paciente?.em_avaliacao || null,
+      isDiaNaoFuncionou: row.status === 'CANCELADO' && typeof row.observacoes === 'string' && row.observacoes.startsWith('DIA NAO FUNCIONOU'),
+      terapeutas: (row.sessao_terapeutas || [])
+        .filter((st: any) => st.terapeutas?.nome)
+        .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes, ativo: st.terapeutas?.ativo ?? true })),
+    }
+  })
 
   const stats = calcularStats(sessoes)
   return { sessoes, stats }
@@ -673,20 +705,22 @@ export async function listarEstatisticasGerais(
 
   const { data: rows, error } = await supabase
     .from('sessoes')
-    .select('id, status, paciente_id, patients(nome)')
+    .select('id, status, observacoes, paciente_id, patients(nome)')
     .gte('data', dataInicio)
     .lte('data', dataFim)
 
   if (error) throw new Error(error.message)
 
   const sessoes = rows || []
-  const stats = calcularStats(sessoes.map((r: any) => ({ status: r.status })))
+  const stats = calcularStats(sessoes.map((r: any) => ({ status: r.status, isDiaNaoFuncionou: r.status === 'CANCELADO' && typeof r.observacoes === 'string' && r.observacoes.startsWith('DIA NAO FUNCIONOU') })))
 
-  // Agrupa por paciente
+  // Agrupa por paciente (exclui dias que nao funcionaram)
   const map = new Map<string, { nome: string; total: number; presente: number }>()
   for (const r of sessoes) {
     const pid = r.paciente_id
     if (!pid) continue
+    // Pula sessoes canceladas por "Dia Nao Funcionou"
+    if (r.status === 'CANCELADO' && typeof r.observacoes === 'string' && r.observacoes.startsWith('DIA NAO FUNCIONOU')) continue
     const existente = map.get(pid)
     if (existente) {
       existente.total++
@@ -714,16 +748,18 @@ export async function listarEstatisticasGerais(
   return { stats, porPaciente }
 }
 
-function calcularStats(sessoes: { status: string }[]): StatsResumo {
-  const total = sessoes.length
-  const presente = sessoes.filter(s => s.status === 'PRESENTE').length
-  const falta = sessoes.filter(s => s.status === 'FALTA').length
-  const faltaJustificada = sessoes.filter(s => s.status === 'FALTA_JUSTIFICADA').length
-  const atestado = sessoes.filter(s => s.status === 'ATESTADO').length
-  const atestadoProfissional = sessoes.filter(s => s.status === 'ATESTADO_PROFISSIONAL').length
-  const faltaProfissional = sessoes.filter(s => s.status === 'FALTA_PROFISSIONAL').length
-  const ausenciaProfissional = sessoes.filter(s => s.status === 'AUSENCIA_PROFISSIONAL').length
-  const cancelado = sessoes.filter(s => s.status === 'CANCELADO').length
+function calcularStats(sessoes: { status: string; isDiaNaoFuncionou?: boolean }[]): StatsResumo {
+  // Exclui dias que nao funcionaram das estatisticas
+  const validas = sessoes.filter(s => !s.isDiaNaoFuncionou)
+  const total = validas.length
+  const presente = validas.filter(s => s.status === 'PRESENTE').length
+  const falta = validas.filter(s => s.status === 'FALTA').length
+  const faltaJustificada = validas.filter(s => s.status === 'FALTA_JUSTIFICADA').length
+  const atestado = validas.filter(s => s.status === 'ATESTADO').length
+  const atestadoProfissional = validas.filter(s => s.status === 'ATESTADO_PROFISSIONAL').length
+  const faltaProfissional = validas.filter(s => s.status === 'FALTA_PROFISSIONAL').length
+  const ausenciaProfissional = validas.filter(s => s.status === 'AUSENCIA_PROFISSIONAL').length
+  const cancelado = validas.filter(s => s.status === 'CANCELADO').length
   const taxaComparecimento = total > 0 ? Math.round((presente / total) * 100) : 0
 
   return { total, presente, falta, faltaJustificada, atestado, atestadoProfissional, faltaProfissional, ausenciaProfissional, cancelado, taxaComparecimento }
@@ -935,4 +971,77 @@ export async function marcarAusenciaProfissionalDia(terapeutaId: string, data: s
   if (updError) throw new Error(updError.message)
 
   return idsDoDia.length
+}
+
+export async function marcarTodosPresentesDia(data: string): Promise<number> {
+  const supabase = createAdminClient()
+
+  // Busca todas as sessoes do dia
+  const { data: sessoesDoDia, error: sError } = await supabase
+    .from('sessoes')
+    .select('id')
+    .eq('data', data)
+
+  if (sError) throw new Error(sError.message)
+  if (!sessoesDoDia || sessoesDoDia.length === 0) return 0
+
+  const idsDoDia = sessoesDoDia.map(s => s.id)
+
+  // Atualiza todos os sessao_terapeutas AGENDADO -> PRESENTE
+  const { error: updError } = await supabase
+    .from('sessao_terapeutas')
+    .update({ status: 'PRESENTE' })
+    .in('sessao_id', idsDoDia)
+    .eq('status', 'AGENDADO')
+
+  if (updError) throw new Error(updError.message)
+
+  // Retorna quantos foram atualizados (contagem aproximada)
+  const { count, error: countError } = await supabase
+    .from('sessao_terapeutas')
+    .select('*', { count: 'exact', head: true })
+    .in('sessao_id', idsDoDia)
+    .eq('status', 'PRESENTE')
+
+  if (countError) throw new Error(countError.message)
+  return count || 0
+}
+
+export async function contarSessoesFuturasDoPaciente(pacienteId: string): Promise<number> {
+  const supabase = createAdminClient()
+  const hoje = new Date()
+  const ano = hoje.getFullYear()
+  const mes = String(hoje.getMonth() + 1).padStart(2, '0')
+  const dia = String(hoje.getDate()).padStart(2, '0')
+  const dataHoje = `${ano}-${mes}-${dia}`
+
+  const { count, error } = await supabase
+    .from('sessoes')
+    .select('*', { count: 'exact', head: true })
+    .eq('paciente_id', pacienteId)
+    .gte('data', dataHoje)
+    .eq('status', 'AGENDADO')
+
+  if (error) throw new Error(error.message)
+  return count || 0
+}
+
+export async function cancelarSessoesFuturasDoPaciente(pacienteId: string): Promise<number> {
+  const supabase = createAdminClient()
+  const hoje = new Date()
+  const ano = hoje.getFullYear()
+  const mes = String(hoje.getMonth() + 1).padStart(2, '0')
+  const dia = String(hoje.getDate()).padStart(2, '0')
+  const dataHoje = `${ano}-${mes}-${dia}`
+
+  const { data: rows, error } = await supabase
+    .from('sessoes')
+    .update({ status: 'CANCELADO', observacoes: 'PACIENTE FORA DE TRATAMENTO' })
+    .eq('paciente_id', pacienteId)
+    .gte('data', dataHoje)
+    .eq('status', 'AGENDADO')
+    .select('id')
+
+  if (error) throw new Error(error.message)
+  return (rows || []).length
 }
