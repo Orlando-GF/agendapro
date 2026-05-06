@@ -1,6 +1,8 @@
 'use client'
 
+import { useMemo } from 'react'
 import { Terapeuta, Ausencia } from '../actions'
+import { formatDateISO } from '@/lib/date-helpers'
 
 function formatTelefone(val: string): string {
   const nums = val.replace(/\D/g, '').slice(0, 11)
@@ -19,6 +21,15 @@ interface Props {
 }
 
 export function TerapeutasView({ terapeutas, ausencias, onEditar, onExcluir }: Props) {
+  const terapeutasOrdenados = useMemo(() => {
+    return [...terapeutas].sort((a, b) => {
+      const aAtivo = a.ativo ?? true
+      const bAtivo = b.ativo ?? true
+      if (aAtivo === bAtivo) return a.nome.localeCompare(b.nome)
+      return aAtivo ? -1 : 1
+    })
+  }, [terapeutas])
+
   return (
     <div className="bg-white rounded-lg border overflow-hidden">
       <div className="overflow-x-auto">
@@ -35,18 +46,19 @@ export function TerapeutasView({ terapeutas, ausencias, onEditar, onExcluir }: P
             </tr>
           </thead>
           <tbody className="divide-y">
-            {[...terapeutas].sort((a, b) => {
-              const aAtivo = a.ativo ?? true
-              const bAtivo = b.ativo ?? true
-              if (aAtivo === bAtivo) return a.nome.localeCompare(b.nome)
-              return aAtivo ? -1 : 1
-            }).map(t => (
+            {terapeutasOrdenados.map(t => (
               <tr key={t.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 font-medium text-gray-900">{t.nome}</td>
                 <td className="px-4 py-3 text-gray-600">
                   <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{t.especialidade_nome || '-'}</span>
                 </td>
-                <td className="px-4 py-3 text-gray-600">{t.telefone ? formatTelefone(t.telefone) : '-'}</td>
+                <td className="px-4 py-3 text-gray-600">
+                  {t.telefone ? (
+                    <a href={`tel:${t.telefone.replace(/\D/g, '')}`} className="text-blue-600 hover:underline">
+                      {formatTelefone(t.telefone)}
+                    </a>
+                  ) : '-'}
+                </td>
                 <td className="px-4 py-3 text-gray-600">
                   {t.dias_trabalho && t.dias_trabalho.length > 0
                     ? [...t.dias_trabalho].sort((a, b) => ORDEM_DIAS.indexOf(a) - ORDEM_DIAS.indexOf(b)).map(d => d.split('-')[0].toUpperCase()).join(', ')
@@ -54,7 +66,7 @@ export function TerapeutasView({ terapeutas, ausencias, onEditar, onExcluir }: P
                 </td>
                 <td className="px-4 py-3 text-gray-600">
                   {(() => {
-                    const hoje = new Date().toISOString().split('T')[0]
+                    const hoje = formatDateISO(new Date())
                     const lista = (ausencias || [])
                       .filter(a => a.terapeuta_id === t.id && a.data_fim >= hoje)
                       .sort((a, b) => a.data_inicio.localeCompare(b.data_inicio))
@@ -64,8 +76,8 @@ export function TerapeutasView({ terapeutas, ausencias, onEditar, onExcluir }: P
                       <div className="flex flex-col gap-0.5">
                         {lista.map(a => (
                           <span key={a.id} className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200">
-                            {a.motivo}: {new Date(a.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')}
-                            {a.data_inicio !== a.data_fim && ` a ${new Date(a.data_fim + 'T00:00:00').toLocaleDateString('pt-BR')}`}
+                            {a.motivo}: {new Date(...a.data_inicio.split('-').map(Number).map((v, i) => i === 1 ? v - 1 : v) as [number, number, number]).toLocaleDateString('pt-BR')}
+                            {a.data_inicio !== a.data_fim && ` a ${new Date(...a.data_fim.split('-').map(Number).map((v, i) => i === 1 ? v - 1 : v) as [number, number, number]).toLocaleDateString('pt-BR')}`}
                           </span>
                         ))}
                       </div>
@@ -86,7 +98,7 @@ export function TerapeutasView({ terapeutas, ausencias, onEditar, onExcluir }: P
               </tr>
             ))}
             {terapeutas.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">Nenhum terapeuta cadastrado.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Nenhum terapeuta cadastrado.</td></tr>
             )}
           </tbody>
         </table>

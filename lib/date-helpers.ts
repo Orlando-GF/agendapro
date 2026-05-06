@@ -41,7 +41,7 @@ export interface SessaoWhatsApp {
   paciente_nome?: string
   paciente_codigo?: string | null
   paciente_em_avaliacao?: boolean | null
-  terapeutas?: { nome: string }[]
+  terapeutas?: { nome: string; ativo?: boolean | null }[]
 }
 
 function abreviarNome(nome: string): string {
@@ -93,10 +93,10 @@ export function formatarAgendaWhatsApp(
     return da.localeCompare(db)
   })
 
-  // Agrupa por equipe (conjunto de terapeutas)
+  // Agrupa por equipe (conjunto de terapeutas) — ignora terapeutas inativos
   const mapa = new Map<string, SessaoWhatsApp[]>()
   for (const s of ordenadas) {
-    const ts = (s.terapeutas || []).map(t => t.nome).sort()
+    const ts = (s.terapeutas || []).filter(t => t.ativo !== false).map(t => t.nome).sort()
     const chave = ts.length > 0 ? ts.join(' + ') : 'SEM TERAPEUTA'
     const lista = mapa.get(chave) || []
     lista.push(s)

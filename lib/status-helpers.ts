@@ -9,6 +9,11 @@ export const STATUS_COR: Record<string, string> = {
   AUSENCIA_PROFISSIONAL: 'bg-teal-100 text-teal-800 border-teal-300',
   CANCELADO: 'bg-gray-100 text-gray-500 border-gray-300',
   REPOSTO: 'bg-cyan-100 text-cyan-800 border-cyan-300',
+  EM_TRATAMENTO: 'bg-green-100 text-green-800 border-green-300',
+  ALTA: 'bg-blue-100 text-blue-800 border-blue-300',
+  DESISTIU: 'bg-red-100 text-red-800 border-red-300',
+  MUDANCA: 'bg-orange-100 text-orange-800 border-orange-300',
+  FERIADO: 'bg-orange-50 text-orange-600 border-orange-200',
 }
 
 export const STATUS_CONFIG: Record<string, { label: string; cor: string; hover: string }> = {
@@ -21,6 +26,10 @@ export const STATUS_CONFIG: Record<string, { label: string; cor: string; hover: 
   FALTA_PROFISSIONAL: { label: 'FALTA PROFISSIONAL', cor: 'bg-pink-50 text-pink-700 border-pink-200', hover: 'hover:bg-pink-100' },
   AUSENCIA_PROFISSIONAL: { label: 'AUSÊNCIA PROFISSIONAL', cor: 'bg-teal-50 text-teal-700 border-teal-200', hover: 'hover:bg-teal-100' },
   CANCELADO: { label: 'CANCELAR', cor: 'bg-gray-100 text-gray-500 border-gray-300 line-through', hover: 'hover:bg-gray-200' },
+  EM_TRATAMENTO: { label: 'EM TRATAMENTO', cor: 'bg-green-50 text-green-700 border-green-200', hover: 'hover:bg-green-100' },
+  ALTA: { label: 'ALTA', cor: 'bg-blue-50 text-blue-700 border-blue-200', hover: 'hover:bg-blue-100' },
+  DESISTIU: { label: 'DESISTIU', cor: 'bg-red-50 text-red-700 border-red-200', hover: 'hover:bg-red-100' },
+  MUDANCA: { label: 'MUDANÇA', cor: 'bg-orange-50 text-orange-700 border-orange-200', hover: 'hover:bg-orange-100' },
 }
 
 export const STATUS_TERAPETA_CONFIG: Record<string, { label: string; cor: string }> = {

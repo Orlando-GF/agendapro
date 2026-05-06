@@ -131,7 +131,7 @@ async function main() {
     terapeutaMap.set(t.nome.toLowerCase(), t.id)
   }
 
-  const dataDir = 'dados'
+  const dataDir = path.join(__dirname, 'dados')
   const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.csv'))
   const pacientes = new Map<string, PacienteCSV>()
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { formatDateISO } from '@/lib/date-helpers'
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
@@ -30,12 +31,12 @@ export async function POST(req: NextRequest) {
       codigo: null,
       telefone: null,
       responsavel: null,
-      horario_padrao: null,
+
       observacoes: 'DADOS ANONIMIZADOS POR SOLICITAÇÃO LGPD',
       ativo: false,
       status_tratamento: 'DESISTIU',
       motivo_saida: 'SOLICITAÇÃO DE EXCLUSÃO (LGPD)',
-      data_saida: new Date().toISOString().split('T')[0],
+      data_saida: formatDateISO(new Date()),
     })
     .eq('id', paciente_id)
 

@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
       codigo: paciente.codigo,
       telefone: paciente.telefone,
       responsavel: paciente.responsavel,
-      horario_padrao: paciente.horario_padrao,
+
       ativo: paciente.ativo,
       em_avaliacao: paciente.em_avaliacao,
       whatsapp_adicionado: paciente.whatsapp_adicionado,

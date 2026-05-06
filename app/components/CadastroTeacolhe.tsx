@@ -32,6 +32,7 @@ import { ToastProvider } from './ToastProvider'
 import { ToastContainer } from './ToastContainer'
 import { useToast } from '../hooks/useToast'
 import { usePacientes } from '../hooks/usePacientes'
+import { LogoutButton } from './LogoutButton'
 import { useCrudList } from '../hooks/useCrudList'
 import { useAgenda } from '../hooks/useAgenda'
 import { useRecepcao } from '../hooks/useRecepcao'
@@ -133,7 +134,7 @@ function CadastroTeacolheInner({
 
   // Recepção
   const [dataRecepcao, setDataRecepcao] = useState<Date>(new Date())
-  const { sessoes: sessoesHoje, ausencias: ausenciasRecepcao, bloqueios: bloqueiosRecepcao, horariosPadrao, loading: loadingRecepcao, recarregar: recarregarRecepcao } = useRecepcao(dataRecepcao, view, toastError)
+  const { sessoes: sessoesHoje, ausencias: ausenciasRecepcao, bloqueios: bloqueiosRecepcao, loading: loadingRecepcao, recarregar: recarregarRecepcao } = useRecepcao(dataRecepcao, view, toastError)
 
   // Loading global para ações (salvar/excluir)
   const [submitting, setSubmitting] = useState(false)
@@ -456,6 +457,7 @@ function CadastroTeacolheInner({
                 + {btnLabels[view]}
               </button>
             )}
+            <LogoutButton />
           </div>
         </header>
 
@@ -550,7 +552,7 @@ function CadastroTeacolheInner({
                   ))}
                 </div>
               </div>
-              <PacienteTable pacientes={pacientes} page={paginaPacientes} hasMore={hasMore} total={totalPacientes} onEditar={p => abrirForm('paciente', p)} onExcluir={id => handleExcluir('paciente', id)} onMudarPagina={setPaginaPacientes} />
+              <PacienteTable pacientes={pacientes} page={paginaPacientes} hasMore={hasMore} total={totalPacientes} loading={loadingPacientes} onEditar={p => abrirForm('paciente', p)} onExcluir={id => handleExcluir('paciente', id)} onMudarPagina={setPaginaPacientes} />
             </>
           )}
 
@@ -578,7 +580,7 @@ function CadastroTeacolheInner({
           {view === 'recepcao' && (
             <>
               {loadingRecepcao && <span className="text-sm text-gray-500 mb-2 block">Carregando...</span>}
-              <RecepcaoView sessoes={sessoesHoje} terapeutas={terapeutas} horarios={horarios} ausencias={ausenciasRecepcao} bloqueios={bloqueiosRecepcao} horariosPadrao={horariosPadrao} dataAtual={dataRecepcao} terapeutaFiltro={terapeutaFiltro} onMudarData={setDataRecepcao} onMudarStatus={handleMudarStatusSessao} onMudarStatusTerapeuta={handleMudarStatusTerapeuta} onMarcarAusenciaProfissional={handleMarcarAusenciaProfissional} onMarcarAusenciaProfissionalDia={handleMarcarAusenciaProfissionalDia} onCancelarDia={handleCancelarDia} onEditarPaciente={handleEditarPaciente} onMarcarTodosPresentes={handleMarcarTodosPresentes} />
+              <RecepcaoView sessoes={sessoesHoje} terapeutas={terapeutas} horarios={horarios} ausencias={ausenciasRecepcao} bloqueios={bloqueiosRecepcao} dataAtual={dataRecepcao} terapeutaFiltro={terapeutaFiltro} onMudarData={setDataRecepcao} onMudarStatus={handleMudarStatusSessao} onMudarStatusTerapeuta={handleMudarStatusTerapeuta} onMarcarAusenciaProfissional={handleMarcarAusenciaProfissional} onMarcarAusenciaProfissionalDia={handleMarcarAusenciaProfissionalDia} onCancelarDia={handleCancelarDia} onEditarPaciente={handleEditarPaciente} onMarcarTodosPresentes={handleMarcarTodosPresentes} />
             </>
           )}
 

@@ -1,20 +1,12 @@
 'use client'
 
 import { Sessao } from '../actions'
+import { STATUS_COR } from '@/lib/status-helpers'
 
 interface Props {
   sessoes: Sessao[]
   onEditar: (s: Sessao) => void
   onExcluir: (id: string) => void
-}
-
-const STATUS_COR: Record<string, string> = {
-  AGENDADO: 'bg-yellow-50 text-yellow-700',
-  CONFIRMADO: 'bg-blue-50 text-blue-700',
-  PRESENTE: 'bg-green-50 text-green-700',
-  FALTA: 'bg-red-50 text-red-700',
-  CANCELADO: 'bg-gray-100 text-gray-400 line-through',
-  REPOSTO: 'bg-purple-50 text-purple-700',
 }
 
 export function SessoesView({ sessoes, onEditar, onExcluir }: Props) {

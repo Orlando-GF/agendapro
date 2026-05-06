@@ -1,5 +1,6 @@
 'use client'
 
+import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { recepcaoDia, listarAusencias, listarBloqueios, Sessao, Ausencia, Bloqueio } from '../actions'
 import { formatDateISO } from '@/lib/date-helpers'
@@ -19,8 +20,8 @@ export function useRecepcao(dataAtual: Date, viewAtiva: string, _toastError?: (m
   })
 
   const ausenciasQuery = useQuery({
-    queryKey: ['recepcao', 'ausencias'],
-    queryFn: () => listarAusencias(),
+    queryKey: ['recepcao', 'ausencias', dataISO],
+    queryFn: () => listarAusencias(dataISO, dataISO),
     enabled,
     staleTime: 60_000,
   })
@@ -34,13 +35,13 @@ export function useRecepcao(dataAtual: Date, viewAtiva: string, _toastError?: (m
 
   const loading = sessoesQuery.isLoading || ausenciasQuery.isLoading || bloqueiosQuery.isLoading
 
-  const recarregarTudo = () => {
+  const recarregarTudo = useCallback(() => {
     queryClient.refetchQueries({ queryKey: ['recepcao', 'sessoes', dataISO], type: 'active' })
-    queryClient.refetchQueries({ queryKey: ['recepcao', 'ausencias'], type: 'active' })
+    queryClient.refetchQueries({ queryKey: ['recepcao', 'ausencias', dataISO], type: 'active' })
     queryClient.refetchQueries({ queryKey: ['recepcao', 'bloqueios', dataISO], type: 'active' })
     queryClient.invalidateQueries({ queryKey: ['agenda'] })
     queryClient.invalidateQueries({ queryKey: ['relatorios'] })
-  }
+  }, [queryClient, dataISO])
 
   useRealtime({ table: 'sessoes', onChange: recarregarTudo })
   useRealtime({ table: 'sessao_terapeutas', onChange: recarregarTudo })
@@ -50,7 +51,7 @@ export function useRecepcao(dataAtual: Date, viewAtiva: string, _toastError?: (m
   const recarregar = async () => {
     await Promise.all([
       queryClient.refetchQueries({ queryKey: ['recepcao', 'sessoes', dataISO], type: 'active' }),
-      queryClient.refetchQueries({ queryKey: ['recepcao', 'ausencias'], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['recepcao', 'ausencias', dataISO], type: 'active' }),
       queryClient.refetchQueries({ queryKey: ['recepcao', 'bloqueios', dataISO], type: 'active' }),
     ])
   }
@@ -59,7 +60,7 @@ export function useRecepcao(dataAtual: Date, viewAtiva: string, _toastError?: (m
     sessoes: sessoesQuery.data ?? [],
     ausencias: ausenciasQuery.data ?? [],
     bloqueios: bloqueiosQuery.data ?? [],
-    horariosPadrao: undefined as Map<string, Set<string>> | undefined,
+
     loading,
     recarregar,
   }

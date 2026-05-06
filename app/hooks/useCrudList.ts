@@ -28,7 +28,15 @@ export function useCrudList<T>(
   }, [viewAtiva])
 
   const recarregar = async () => {
-    setItems(await actions.listar())
+    setLoading(true)
+    try {
+      const data = await actions.listar()
+      setItems(data)
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return { items, loading, setItems, recarregar }

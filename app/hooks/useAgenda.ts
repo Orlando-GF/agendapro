@@ -1,5 +1,6 @@
 'use client'
 
+import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { agendaSemana, listarBloqueios, listarAusencias, Sessao, Bloqueio, Ausencia } from '../actions'
 import { formatDateISO } from '@/lib/date-helpers'
@@ -33,20 +34,20 @@ export function useAgenda(semanaAtual: Date, viewAtiva: string, _toastError?: (m
   })
 
   const ausenciasQuery = useQuery({
-    queryKey: ['agenda', 'ausencias'],
-    queryFn: () => listarAusencias(),
+    queryKey: ['agenda', 'ausencias', inicio, fim],
+    queryFn: () => listarAusencias(inicio, fim),
     enabled,
     staleTime: 60_000,
   })
 
   const loading = sessoesQuery.isLoading || bloqueiosQuery.isLoading || ausenciasQuery.isLoading
 
-  const invalidateAll = () => {
+  const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['agenda', 'sessoes', inicio, fim] })
     queryClient.invalidateQueries({ queryKey: ['agenda', 'bloqueios', inicio, fim] })
-    queryClient.invalidateQueries({ queryKey: ['agenda', 'ausencias'] })
+    queryClient.invalidateQueries({ queryKey: ['agenda', 'ausencias', inicio, fim] })
     queryClient.invalidateQueries({ queryKey: ['recepcao'] })
-  }
+  }, [queryClient, inicio, fim])
 
   useRealtime({ table: 'sessoes', onChange: invalidateAll })
   useRealtime({ table: 'sessao_terapeutas', onChange: invalidateAll })
@@ -57,7 +58,7 @@ export function useAgenda(semanaAtual: Date, viewAtiva: string, _toastError?: (m
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['agenda', 'sessoes', inicio, fim] }),
       queryClient.invalidateQueries({ queryKey: ['agenda', 'bloqueios', inicio, fim] }),
-      queryClient.invalidateQueries({ queryKey: ['agenda', 'ausencias'] }),
+      queryClient.invalidateQueries({ queryKey: ['agenda', 'ausencias', inicio, fim] }),
     ])
   }
 

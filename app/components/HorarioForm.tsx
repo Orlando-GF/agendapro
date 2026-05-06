@@ -1,80 +1,76 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Horario } from '../actions'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { HorarioSchema } from '@/server/domains/horarios/schema'
+import type { HorarioInput } from '@/server/domains/horarios/schema'
+import type { Horario } from '../actions'
 import { SidepanelContainer } from './SidepanelContainer'
 import { FormInput } from './FormInput'
 
 interface Props {
   horario?: Horario | null
-  onSalvar: (dados: { id?: string; hora_inicio: string; hora_fim: string; ordem: number }) => void
+  onSalvar: (dados: HorarioInput) => void
   onCancelar: () => void
 }
 
-function validarHora(val: string): boolean {
-  return /^\d{2}:\d{2}$/.test(val)
-}
-
 export function HorarioForm({ horario, onSalvar, onCancelar }: Props) {
-  const [horaInicio, setHoraInicio] = useState('')
-  const [horaFim, setHoraFim] = useState('')
-  const [ordem, setOrdem] = useState(1)
-  const [erros, setErros] = useState<Record<string, string>>({})
-
-  useEffect(() => {
-    setHoraInicio(horario?.hora_inicio || '')
-    setHoraFim(horario?.hora_fim || '')
-    setOrdem(horario?.ordem || 1)
-    setErros({})
-  }, [horario])
-
-  const validar = (): boolean => {
-    const next: Record<string, string> = {}
-    if (!horaInicio.trim()) next.horaInicio = 'Hora de início é obrigatória'
-    else if (!validarHora(horaInicio)) next.horaInicio = 'Formato inválido (HH:MM)'
-    if (!horaFim.trim()) next.horaFim = 'Hora de fim é obrigatória'
-    else if (!validarHora(horaFim)) next.horaFim = 'Formato inválido (HH:MM)'
-    if (ordem < 1) next.ordem = 'Ordem deve ser maior que 0'
-    setErros(next)
-    return Object.keys(next).length === 0
-  }
-
-  const handleSalvar = () => {
-    if (!validar()) return
-    onSalvar({ id: horario?.id, hora_inicio: horaInicio, hora_fim: horaFim, ordem })
-  }
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<HorarioInput>({
+    resolver: zodResolver(HorarioSchema),
+    defaultValues: {
+      id: horario?.id,
+      hora_inicio: horario?.hora_inicio || '',
+      hora_fim: horario?.hora_fim || '',
+      ordem: horario?.ordem || 1,
+    },
+  })
 
   return (
     <SidepanelContainer titulo={horario ? 'Editar Horário' : 'Novo Horário'} onFechar={onCancelar}>
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <form id="form-horario" onSubmit={handleSubmit(onSalvar)} className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <FormInput
             label="Hora Início *"
             placeholder="18:15"
-            value={horaInicio}
-            onChange={e => { setHoraInicio(e.target.value); if (erros.horaInicio) setErros(p => { const n = { ...p }; delete n.horaInicio; return n }) }}
-            erro={erros.horaInicio}
+            {...register('hora_inicio')}
+            erro={errors.hora_inicio?.message}
           />
           <FormInput
             label="Hora Fim *"
             placeholder="18:45"
-            value={horaFim}
-            onChange={e => { setHoraFim(e.target.value); if (erros.horaFim) setErros(p => { const n = { ...p }; delete n.horaFim; return n }) }}
-            erro={erros.horaFim}
+            {...register('hora_fim')}
+            erro={errors.hora_fim?.message}
           />
         </div>
         <FormInput
           label="Ordem *"
           type="number"
           min={1}
-          value={ordem}
-          onChange={e => { setOrdem(Math.max(1, parseInt(e.target.value) || 1)); if (erros.ordem) setErros(p => { const n = { ...p }; delete n.ordem; return n }) }}
-          erro={erros.ordem}
+          {...register('ordem', { valueAsNumber: true })}
+          erro={errors.ordem?.message}
         />
-      </div>
+      </form>
       <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
-        <button onClick={onCancelar} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-white font-medium bg-gray-100 normal-case">Cancelar</button>
-        <button onClick={handleSalvar} className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium normal-case">Salvar</button>
+        <button
+          type="button"
+          onClick={onCancelar}
+          disabled={isSubmitting}
+          className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-white font-medium bg-gray-100 disabled:opacity-50 normal-case"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          form="form-horario"
+          disabled={isSubmitting}
+          className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50 normal-case"
+        >
+          {isSubmitting ? 'Salvando...' : 'Salvar'}
+        </button>
       </div>
     </SidepanelContainer>
   )

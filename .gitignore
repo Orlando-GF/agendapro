@@ -42,7 +42,10 @@ next-env.d.ts
 
 # temp files
 tmp-*
-tmp_*.js
-tmp_*.mjs
-tmp_*.ts
+tmp_*
+check_braces.py
+dev.log
+
+# playwright auth state
+__tests__/e2e/.auth/
 

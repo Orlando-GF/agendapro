@@ -12,9 +12,14 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: '__tests__/e2e/.auth/user.json',
+      },
+      dependencies: ['setup'],
     },
   ],
   webServer: {

@@ -194,7 +194,7 @@ async function main() {
   }
 
   // Parsear CSVs
-  const dataDir = 'dados'
+  const dataDir = path.join(__dirname, 'dados')
   const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.csv'))
   const agendas: PacienteAgenda[] = []
 

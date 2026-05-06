@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { TerapeutaSchema } from '@/server/domains/terapeutas/schema'
 import type { TerapeutaInput } from '@/server/domains/terapeutas/schema'
 import type { Terapeuta, Especialidade, Ausencia, AusenciaFormData } from '../actions'
+import { formatDateISO } from '@/lib/date-helpers'
 import { SidepanelContainer } from './SidepanelContainer'
 import { FormInput } from './FormInput'
 import { FormSelect } from './FormSelect'
@@ -65,6 +66,7 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
               label="Telefone"
               value={field.value ?? ''}
               onChange={e => field.onChange(formatTelefone(e.target.value) || null)}
+              erro={errors.telefone?.message}
             />
           )}
         />
@@ -151,6 +153,10 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
                   type="button"
                   onClick={() => {
                     if (!novaAusencia.data_inicio || !novaAusencia.data_fim) return
+                    if (novaAusencia.data_inicio > novaAusencia.data_fim) {
+                      alert('DATA DE INICIO NAO PODE SER POSTERIOR A DATA DE FIM.')
+                      return
+                    }
                     onSalvarAusencia({
                       terapeuta_id: terapeuta.id,
                       data_inicio: novaAusencia.data_inicio,
@@ -170,7 +176,7 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
             {ausencias && ausencias.length > 0 && (
               <div className="space-y-1">
                 {ausencias
-                  .filter(a => a.terapeuta_id === terapeuta.id)
+                  .filter(a => a.terapeuta_id === terapeuta.id && a.data_fim >= formatDateISO(new Date()))
                   .sort((a, b) => a.data_inicio.localeCompare(b.data_inicio))
                   .map(a => (
                     <div key={a.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
@@ -178,15 +184,19 @@ export function TerapeutaForm({ terapeuta, especialidades, ausencias, onSalvar, 
                         <span className="font-medium">{a.motivo}</span>
                         <span className="text-gray-500">
                           {a.data_inicio === a.data_fim
-                            ? new Date(a.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')
-                            : `${new Date(a.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')} a ${new Date(a.data_fim + 'T00:00:00').toLocaleDateString('pt-BR')}`
+                            ? new Date(...a.data_inicio.split('-').map(Number).map((v, i) => i === 1 ? v - 1 : v) as [number, number, number]).toLocaleDateString('pt-BR')
+                            : `${new Date(...a.data_inicio.split('-').map(Number).map((v, i) => i === 1 ? v - 1 : v) as [number, number, number]).toLocaleDateString('pt-BR')} a ${new Date(...a.data_fim.split('-').map(Number).map((v, i) => i === 1 ? v - 1 : v) as [number, number, number]).toLocaleDateString('pt-BR')}`
                           }
                         </span>
                       </div>
                       {onExcluirAusencia && (
                         <button
                           type="button"
-                          onClick={() => onExcluirAusencia(a.id)}
+                          onClick={() => {
+                            if (confirm('TEM CERTEZA QUE DESEJA EXCLUIR ESTA AUSENCIA?')) {
+                              onExcluirAusencia(a.id)
+                            }
+                          }}
                           className="text-red-600 hover:text-red-800 text-xs font-medium normal-case"
                         >
                           Excluir

@@ -18,7 +18,7 @@ export function StatsCards({ total, emAvaliacao, judicial, semWhatsapp, comLaudo
   ]
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
       {cards.map((c) => (
         <div key={c.label} className={`rounded-lg p-4 ${c.color}`}>
           <div className="text-2xl font-bold">{c.value}</div>

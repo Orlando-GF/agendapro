@@ -4,7 +4,7 @@ import { useMemo, useState, useRef, useEffect } from 'react'
 import { Patient, Terapeuta, SessaoHistorico, StatsResumo } from '../actions'
 import { formatDateBRFromISO, formatDateISO } from '@/lib/date-helpers'
 import { exportarExcel } from '@/lib/export-utils'
-import { extrairMotivoAusencia } from '@/lib/status-helpers'
+import { extrairMotivoAusencia, STATUS_COR as STATUS_COR_HELPER } from '@/lib/status-helpers'
 
 interface Props {
   pacientes: Patient[]
@@ -13,19 +13,6 @@ interface Props {
   onBuscarTerapeuta: (terapeutaId: string, dataInicio: string, dataFim: string) => Promise<{ sessoes: SessaoHistorico[]; stats: StatsResumo }>
   onBuscarGeral: (dataInicio: string, dataFim: string) => Promise<{ stats: StatsResumo; porPaciente: { paciente_id: string; nome: string; total: number; presente: number; taxa: number }[] }>
   onBuscarPacientes?: (filtro: string) => Promise<Patient[]>
-}
-
-const STATUS_COR: Record<string, string> = {
-  AGENDADO: 'bg-yellow-100 text-yellow-700',
-  PRESENTE: 'bg-green-100 text-green-700',
-  FALTA: 'bg-red-100 text-red-700',
-  FALTA_JUSTIFICADA: 'bg-orange-100 text-orange-700',
-  ATESTADO: 'bg-purple-100 text-purple-700',
-  ATESTADO_PROFISSIONAL: 'bg-indigo-100 text-indigo-700',
-  FALTA_PROFISSIONAL: 'bg-pink-100 text-pink-700',
-  AUSENCIA_PROFISSIONAL: 'bg-teal-100 text-teal-700',
-  CANCELADO: 'bg-gray-100 text-gray-500',
-  FERIADO: 'bg-orange-50 text-orange-600 border-orange-200',
 }
 
 const STATUS_TERAPETA_COR: Record<string, string> = {
@@ -93,11 +80,11 @@ function TabelaHistorico({ sessoes }: { sessoes: SessaoHistorico[] }) {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-col gap-1">
-                    {s.terapeutas.map(t => {
+                    {s.terapeutas.map((t, idx) => {
                       const motivo = extrairMotivoAusencia(t.observacoes)
                       const inativo = t.ativo === false
                       return (
-                        <div key={t.nome} className="flex items-center gap-1.5">
+                        <div key={`${t.nome}-${idx}`} className="flex items-center gap-1.5">
                           <span className={`text-xs ${inativo ? 'text-red-500 line-through' : 'text-gray-700'}`}>
                             {t.nome}
                           </span>
@@ -117,7 +104,7 @@ function TabelaHistorico({ sessoes }: { sessoes: SessaoHistorico[] }) {
                 </td>
                 <td className="px-4 py-3 text-center">
                   {s.isDiaNaoFuncionou ? (
-                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${STATUS_COR.FERIADO}`}>
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${STATUS_COR_HELPER.FERIADO}`}>
                       FERIADO
                     </span>
                   ) : s.paciente_em_avaliacao ? (
@@ -125,7 +112,7 @@ function TabelaHistorico({ sessoes }: { sessoes: SessaoHistorico[] }) {
                       EM AVALIAÇÃO
                     </span>
                   ) : (
-                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COR[s.status] || 'bg-gray-100 text-gray-600'}`}>
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COR_HELPER[s.status] || 'bg-gray-100 text-gray-600'}`}>
                       {s.status.replace(/_/g, ' ')}
                     </span>
                   )}
@@ -188,12 +175,18 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
 
   const buscarPaciente = async () => {
     if (!pacienteId) return
+    if (dataInicio > dataFim) {
+      alert('DATA DE INICIO NAO PODE SER POSTERIOR A DATA DE FIM.')
+      return
+    }
     setLoading(true)
     try {
       const res = await onBuscarPaciente(pacienteId, dataInicio, dataFim)
       setSessoes(res.sessoes)
       setStats(res.stats)
       setRanking([])
+    } catch (err: any) {
+      alert(err.message || 'ERRO AO BUSCAR HISTORICO.')
     } finally {
       setLoading(false)
     }
@@ -212,6 +205,8 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
       const res = await onBuscarPacientes(termo.trim())
       setSugestoesPacientes(res)
       setMostrarSugestoes(true)
+    } catch (err: any) {
+      alert(err.message || 'ERRO AO BUSCAR PACIENTES.')
     } finally {
       setBuscandoPacientes(false)
     }
@@ -226,24 +221,36 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
 
   const buscarTerapeuta = async () => {
     if (!terapeutaId) return
+    if (dataInicio > dataFim) {
+      alert('DATA DE INICIO NAO PODE SER POSTERIOR A DATA DE FIM.')
+      return
+    }
     setLoading(true)
     try {
       const res = await onBuscarTerapeuta(terapeutaId, dataInicio, dataFim)
       setSessoes(res.sessoes)
       setStats(res.stats)
       setRanking([])
+    } catch (err: any) {
+      alert(err.message || 'ERRO AO BUSCAR HISTORICO.')
     } finally {
       setLoading(false)
     }
   }
 
   const buscarGeral = async () => {
+    if (dataInicio > dataFim) {
+      alert('DATA DE INICIO NAO PODE SER POSTERIOR A DATA DE FIM.')
+      return
+    }
     setLoading(true)
     try {
       const res = await onBuscarGeral(dataInicio, dataFim)
       setStats(res.stats)
       setRanking(res.porPaciente)
       setSessoes([])
+    } catch (err: any) {
+      alert(err.message || 'ERRO AO BUSCAR ESTATISTICAS.')
     } finally {
       setLoading(false)
     }
@@ -263,7 +270,7 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
         ].map(t => (
           <button
             key={t.key}
-            onClick={() => setAba(t.key as any)}
+            onClick={() => setAba(t.key as 'paciente' | 'terapeuta' | 'geral')}
             className={`flex-1 px-4 py-2 text-xs font-medium normal-case ${aba === t.key ? 'bg-blue-50 text-blue-700' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
           >
             {t.label}

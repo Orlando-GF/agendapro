@@ -23,7 +23,8 @@ interface Props {
 
 function diaDaSemanaFormatado(dataISO: string): string {
   const dias = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado']
-  const d = new Date(dataISO + 'T00:00:00')
+  const [ano, mes, dia] = dataISO.split('-').map(Number)
+  const d = new Date(ano, mes - 1, dia)
   return dias[d.getDay()]
 }
 
@@ -54,9 +55,9 @@ function buildDefaults(sessao: Sessao | null | undefined, defaults?: { data?: st
       data: sessao.data,
       hora_inicio: sessao.hora_inicio.slice(0, 5),
       hora_fim: sessao.hora_fim.slice(0, 5),
-      status: sessao.status as any,
+      status: sessao.status as SessaoInput['status'],
       observacoes: sessao.observacoes ?? null,
-      tipo: (sessao.tipo ?? 'SESSAO') as any,
+      tipo: (sessao.tipo ?? 'SESSAO') as SessaoInput['tipo'],
       titulo: sessao.titulo ?? null,
       recorrente: sessao.recorrente ?? false,
       terapeutas_ids: (sessao.terapeutas || []).map(t => t.id),
@@ -99,7 +100,7 @@ export function SessaoForm({ sessao, pacientes, terapeutas, horarios, defaultDat
 
   return (
     <SidepanelContainer titulo={sessao ? 'EDITAR SESSÃO' : 'NOVA SESSÃO'} onFechar={onCancelar}>
-      <form onSubmit={handleSubmit(onSalvar)} className="flex-1 overflow-y-auto p-6 space-y-5">
+      <form id="form-sessao" onSubmit={handleSubmit(onSalvar)} className="flex-1 overflow-y-auto p-6 space-y-5">
         {/* Tipo */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">TIPO *</label>
@@ -123,7 +124,7 @@ export function SessaoForm({ sessao, pacientes, terapeutas, horarios, defaultDat
               placeholder="Ex: Grupo de Pais e Mães"
               className={inputClass(!!errors.titulo || !!errors.paciente_id)}
             />
-            {(errors.titulo || errors.paciente_id) && <p className="mt-1 text-xs text-red-600">{errors.titulo?.message || errors.paciente_id?.message}</p>}
+            {errors.titulo && <p className="mt-1 text-xs text-red-600">{errors.titulo.message}</p>}
           </div>
         )}
 
@@ -248,7 +249,7 @@ export function SessaoForm({ sessao, pacientes, terapeutas, horarios, defaultDat
         </button>
         <button
           type="submit"
-          onClick={handleSubmit(onSalvar)}
+          form="form-sessao"
           disabled={isSubmitting}
           className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed normal-case"
         >

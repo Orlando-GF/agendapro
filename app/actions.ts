@@ -1,8 +1,12 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { formatDateISO } from '@/lib/date-helpers'
+import { PatientSchema } from '@/server/domains/pacientes/schema'
+import { TerapeutaSchema } from '@/server/domains/terapeutas/schema'
+import { EspecialidadeSchema } from '@/server/domains/especialidades/schema'
+import { HorarioSchema } from '@/server/domains/horarios/schema'
+import { SessaoSchema } from '@/server/domains/sessoes/schema'
 
 // ========== PACIENTES ==========
 
@@ -12,14 +16,13 @@ export interface Patient {
   codigo?: string | null
   telefone?: string | null
   responsavel?: string | null
-  horario_padrao?: string | null
   ativo?: boolean | null
   em_avaliacao?: boolean | null
   whatsapp_adicionado?: boolean | null
   judicial?: boolean | null
   laudo?: boolean | null
   observacoes?: string | null
-  status_tratamento?: string | null
+  status_tratamento?: 'EM_TRATAMENTO' | 'ALTA' | 'DESISTIU' | 'MUDANCA' | null
   motivo_saida?: string | null
   data_saida?: string | null
   created_at?: string | null
@@ -32,7 +35,6 @@ export interface PatientFormData {
   codigo?: string | null
   telefone?: string | null
   responsavel?: string | null
-  horario_padrao?: string | null
   ativo?: boolean | null
   em_avaliacao?: boolean | null
   whatsapp_adicionado?: boolean | null
@@ -196,13 +198,14 @@ export async function listarPacientesPaginado(
 }
 
 export async function salvarPaciente(dados: PatientFormData): Promise<Patient> {
-  const supabase = createAdminClient()
+  const validado = PatientSchema.parse(dados)
+  const supabase = await createClient()
   const normalizado = {
     nome: toUpper(dados.nome) ?? '',
     codigo: toUpper(dados.codigo),
     telefone: toUpper(dados.telefone),
     responsavel: toUpper(dados.responsavel),
-    horario_padrao: toUpper(dados.horario_padrao),
+
     ativo: dados.ativo ?? true,
     em_avaliacao: dados.em_avaliacao ?? false,
     whatsapp_adicionado: dados.whatsapp_adicionado ?? false,
@@ -225,20 +228,38 @@ export async function salvarPaciente(dados: PatientFormData): Promise<Patient> {
 }
 
 export async function excluirPaciente(id: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE PACIENTE INVALIDO')
+  const supabase = await createClient()
+
+  // Verifica se o paciente tem sessoes vinculadas para evitar perda de dados
+  const { count, error: countError } = await supabase
+    .from('sessoes')
+    .select('*', { count: 'exact', head: true })
+    .eq('paciente_id', id)
+
+  if (countError) throw new Error(countError.message)
+  if (count && count > 0) {
+    throw new Error('NAO E POSSIVEL EXCLUIR: O PACIENTE POSSUI SESSOES VINCULADAS. CANCELE AS SESSOES PRIMEIRO.')
+  }
+
   const { error } = await supabase.from('patients').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
 
 export async function buscarPacientePorId(id: string): Promise<Patient | null> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE PACIENTE INVALIDO')
+  const supabase = await createClient()
   const { data, error } = await supabase.from('patients').select('*').eq('id', id).single()
-  if (error) return null
+  if (error) {
+    // PGRST116 = nenhum resultado encontrado
+    if (error && typeof error === 'object' && 'code' in error && (error as { code: string }).code === 'PGRST116') return null
+    throw new Error(error.message)
+  }
   return data as Patient
 }
 
 export async function dashboardStats(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number; comLaudo: number }> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const { data, error } = await supabase.rpc('dashboard_stats')
   if (error) throw new Error(error.message)
   if (!data || data.length === 0) {
@@ -255,7 +276,7 @@ export async function dashboardStats(): Promise<{ total: number; emAvaliacao: nu
 }
 
 export async function contarPacientes(): Promise<{ total: number; emAvaliacao: number; judicial: number; semWhatsapp: number; comLaudo: number }> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const { data, error } = await supabase.rpc('contar_pacientes_resumo')
   if (error) throw new Error(error.message)
   if (!data || data.length === 0) {
@@ -274,7 +295,7 @@ export async function contarPacientes(): Promise<{ total: number; emAvaliacao: n
 // ========== TERAPEUTAS ==========
 
 export async function listarTerapeutas(): Promise<Terapeuta[]> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('terapeutas')
     .select('*, especialidades(nome)')
@@ -290,13 +311,14 @@ export async function listarTerapeutas(): Promise<Terapeuta[]> {
 }
 
 export async function salvarTerapeuta(dados: TerapeutaFormData): Promise<Terapeuta> {
-  const supabase = createAdminClient()
+  const parsed = TerapeutaSchema.parse(dados)
+  const supabase = await createClient()
   const normalizado = {
-    ...dados,
-    nome: toUpper(dados.nome) ?? '',
-    telefone: toUpper(dados.telefone),
-    dias_trabalho: dados.dias_trabalho ?? [],
-    ativo: dados.ativo ?? true,
+    ...parsed,
+    nome: toUpper(parsed.nome) ?? '',
+    telefone: parsed.telefone ? toUpper(parsed.telefone) : null,
+    dias_trabalho: parsed.dias_trabalho ?? [],
+    ativo: parsed.ativo ?? true,
   }
   if (normalizado.id) {
     const { id, ...updateData } = normalizado
@@ -311,7 +333,19 @@ export async function salvarTerapeuta(dados: TerapeutaFormData): Promise<Terapeu
 }
 
 export async function excluirTerapeuta(id: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE TERAPEUTA INVALIDO')
+  const supabase = await createClient()
+
+  const { data: sessoes, error: errSessoes } = await supabase
+    .from('sessao_terapeutas')
+    .select('sessao_id')
+    .eq('terapeuta_id', id)
+    .limit(1)
+  if (errSessoes) throw new Error(errSessoes.message)
+  if (sessoes && sessoes.length > 0) {
+    throw new Error('NAO E POSSIVEL EXCLUIR TERapeuta COM SESSOES VINCULADAS.')
+  }
+
   const { error } = await supabase.from('terapeutas').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
@@ -319,15 +353,16 @@ export async function excluirTerapeuta(id: string): Promise<void> {
 // ========== ESPECIALIDADES ==========
 
 export async function listarEspecialidades(): Promise<Especialidade[]> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const { data, error } = await supabase.from('especialidades').select('*').order('nome', { ascending: true })
   if (error) throw new Error(error.message)
   return (data as Especialidade[]) || []
 }
 
 export async function salvarEspecialidade(dados: { id?: string; nome: string }): Promise<Especialidade> {
-  const supabase = createAdminClient()
-  const normalizado = { ...dados, nome: toUpper(dados.nome) ?? '' }
+  const parsed = EspecialidadeSchema.parse(dados)
+  const supabase = await createClient()
+  const normalizado = { ...parsed, nome: toUpper(parsed.nome) ?? '' }
   if (normalizado.id) {
     const { id, ...updateData } = normalizado
     const { data, error } = await supabase.from('especialidades').update(updateData).eq('id', id).select().single()
@@ -341,7 +376,19 @@ export async function salvarEspecialidade(dados: { id?: string; nome: string }):
 }
 
 export async function excluirEspecialidade(id: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE ESPECIALIDADE INVALIDO')
+  const supabase = await createClient()
+
+  const { data: vinculados, error: errVinculados } = await supabase
+    .from('terapeutas')
+    .select('id')
+    .eq('especialidade_id', id)
+    .limit(1)
+  if (errVinculados) throw new Error(errVinculados.message)
+  if (vinculados && vinculados.length > 0) {
+    throw new Error('NAO E POSSIVEL EXCLUIR ESPECIALIDADE COM TERAPEUTAS VINCULADOS.')
+  }
+
   const { error } = await supabase.from('especialidades').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
@@ -349,28 +396,30 @@ export async function excluirEspecialidade(id: string): Promise<void> {
 // ========== HORÁRIOS ==========
 
 export async function listarHorarios(): Promise<Horario[]> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const { data, error } = await supabase.from('horarios').select('*').order('ordem', { ascending: true })
   if (error) throw new Error(error.message)
   return (data as Horario[]) || []
 }
 
 export async function salvarHorario(dados: HorarioFormData): Promise<Horario> {
-  const supabase = createAdminClient()
-  if (dados.id) {
-    const { id, ...updateData } = dados
+  const parsed = HorarioSchema.parse(dados)
+  const supabase = await createClient()
+  if (parsed.id) {
+    const { id, ...updateData } = parsed
     const { data, error } = await supabase.from('horarios').update(updateData).eq('id', id).select().single()
     if (error) throw new Error(error.message)
     return data as Horario
   } else {
-    const { data, error } = await supabase.from('horarios').insert(dados).select().single()
+    const { data, error } = await supabase.from('horarios').insert(parsed).select().single()
     if (error) throw new Error(error.message)
     return data as Horario
   }
 }
 
 export async function excluirHorario(id: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE HORARIO INVALIDO')
+  const supabase = await createClient()
   const { error } = await supabase.from('horarios').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
@@ -378,7 +427,7 @@ export async function excluirHorario(id: string): Promise<void> {
 // ========== SESSÕES ==========
 
 export async function listarSessoes(dataInicio: string, dataFim: string): Promise<Sessao[]> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   // Gera sessoes recorrentes automaticamente ate a data fim
   await supabase.rpc('gerar_sessoes_recorrentes', { p_data_limite: dataFim })
   const { data, error } = await supabase.rpc('listar_sessoes_completas', {
@@ -412,7 +461,7 @@ export async function listarSessoes(dataInicio: string, dataFim: string): Promis
 
 // NOVA: agenda semanal otimizada via RPC
 export async function agendaSemana(dataInicio: string, dataFim: string): Promise<Sessao[]> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const { data, error } = await supabase.rpc('agenda_semana', {
     p_data_inicio: dataInicio,
     p_data_fim: dataFim,
@@ -444,7 +493,8 @@ export async function agendaSemana(dataInicio: string, dataFim: string): Promise
 
 // NOVA: recepcao do dia otimizada via RPC
 export async function recepcaoDia(dataParam: string): Promise<Sessao[]> {
-  const supabase = createAdminClient()
+  if (!isValidISODate(dataParam)) throw new Error('DATA INVALIDA')
+  const supabase = await createClient()
   const { data, error } = await supabase.rpc('recepcao_dia', { p_data: dataParam })
   if (error) throw new Error(error.message)
   const rows = (data as Sessao[]) || []
@@ -472,28 +522,21 @@ export async function recepcaoDia(dataParam: string): Promise<Sessao[]> {
 }
 
 export async function salvarSessao(dados: SessaoFormData): Promise<Sessao> {
-  const supabase = createAdminClient()
-
-  // Validacoes de negocio
-  if (dados.tipo === 'SESSAO' && !dados.paciente_id) {
-    throw new Error('Sessao do tipo SESSAO deve ter um paciente vinculado')
-  }
-  if (!dados.terapeutas_ids || dados.terapeutas_ids.length === 0) {
-    throw new Error('A sessao deve ter pelo menos um terapeuta')
-  }
+  const parsed = SessaoSchema.parse(dados)
+  const supabase = await createClient()
 
   // Verifica se terapeutas estao ativos
   const { data: terapeutasAtivos, error: errTerapeutas } = await supabase
     .from('terapeutas')
     .select('id, ativo')
-    .in('id', dados.terapeutas_ids)
+    .in('id', parsed.terapeutas_ids)
   if (errTerapeutas) throw new Error(errTerapeutas.message)
-  const inativos = (terapeutasAtivos || []).filter((t: any) => t.ativo === false)
+  const inativos = (terapeutasAtivos || []).filter((t: { ativo?: boolean | null }) => t.ativo === false)
   if (inativos.length > 0) {
-    throw new Error(`Terapeuta(s) inativo(s) nao podem ser vinculados: ${inativos.map((t: any) => t.id).join(', ')}`)
+    throw new Error(`Terapeuta(s) inativo(s) nao podem ser vinculados: ${inativos.map((t: { id: string }) => t.id).join(', ')}`)
   }
 
-  const { terapeutas_ids, ...sessaoData } = dados
+  const { terapeutas_ids, ...sessaoData } = parsed
   const { data, error } = await supabase.rpc('salvar_sessao_completa', {
     p_sessao: sessaoData,
     p_terapeutas_ids: terapeutas_ids || [],
@@ -502,21 +545,53 @@ export async function salvarSessao(dados: SessaoFormData): Promise<Sessao> {
   return data as Sessao
 }
 
+const STATUS_SESSAO_VALIDOS = [
+  'AGENDADO',
+  'CONFIRMADO',
+  'PRESENTE',
+  'FALTA',
+  'FALTA_JUSTIFICADA',
+  'ATESTADO',
+  'ATESTADO_PROFISSIONAL',
+  'FALTA_PROFISSIONAL',
+  'AUSENCIA_PROFISSIONAL',
+  'CANCELADO',
+  'REPOSTO',
+] as const
+
 export async function atualizarStatusSessao(id: string, status: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!STATUS_SESSAO_VALIDOS.includes(status as (typeof STATUS_SESSAO_VALIDOS)[number])) {
+    throw new Error(`STATUS INVALIDO: ${status}`)
+  }
+  const supabase = await createClient()
   const { error } = await supabase.from('sessoes').update({ status }).eq('id', id)
   if (error) throw new Error(error.message)
 }
 
+function isValidUUID(v: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
+}
+
+function isValidISODate(v: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(v)
+}
+
+function isValidTime(v: string): boolean {
+  return /^\d{2}:\d{2}(:\d{2})?$/.test(v)
+}
+
 export async function excluirSessao(id: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE SESSAO INVALIDO')
+  const supabase = await createClient()
   const { error } = await supabase.from('sessoes').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
 
 export async function cancelarSessoesDoDia(data: string, motivo: string): Promise<number> {
-  const supabase = createAdminClient()
-  const observacao = motivo ? `DIA NAO FUNCIONOU: ${motivo}` : 'DIA NAO FUNCIONOU'
+  if (!isValidISODate(data)) throw new Error('DATA INVALIDA')
+  if (!motivo || motivo.trim().length === 0) throw new Error('MOTIVO OBRIGATORIO')
+  const supabase = await createClient()
+  const observacao = `DIA NAO FUNCIONOU: ${motivo}`
   const { data: rows, error } = await supabase
     .from('sessoes')
     .update({ status: 'CANCELADO', observacoes: observacao })
@@ -524,7 +599,15 @@ export async function cancelarSessoesDoDia(data: string, motivo: string): Promis
     .eq('status', 'AGENDADO')
     .select('id')
   if (error) throw new Error(error.message)
-  return (rows || []).length
+  const ids = (rows || []).map(r => r.id)
+  if (ids.length > 0) {
+    // Sincroniza sessao_terapeutas para CANCELADO tambem
+    await supabase
+      .from('sessao_terapeutas')
+      .update({ status: 'CANCELADO' })
+      .in('sessao_id', ids)
+  }
+  return ids.length
 }
 
 export async function moverSessao(
@@ -533,7 +616,11 @@ export async function moverSessao(
   novaHoraInicio: string,
   novaHoraFim: string
 ): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE SESSAO INVALIDO')
+  if (!isValidISODate(novaData)) throw new Error('DATA INVALIDA')
+  if (!isValidTime(novaHoraInicio)) throw new Error('HORA DE INICIO INVALIDA')
+  if (!isValidTime(novaHoraFim)) throw new Error('HORA DE FIM INVALIDA')
+  const supabase = await createClient()
   const { error } = await supabase
     .from('sessoes')
     .update({ data: novaData, hora_inicio: novaHoraInicio, hora_fim: novaHoraFim })
@@ -575,7 +662,11 @@ export async function listarHistoricoPaciente(
   dataInicio: string,
   dataFim: string
 ): Promise<{ sessoes: SessaoHistorico[]; stats: StatsResumo }> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(pacienteId)) throw new Error('ID DE PACIENTE INVALIDO')
+  if (!isValidISODate(dataInicio)) throw new Error('DATA DE INICIO INVALIDA')
+  if (!isValidISODate(dataFim)) throw new Error('DATA DE FIM INVALIDA')
+  if (dataInicio > dataFim) throw new Error('DATA DE INICIO NAO PODE SER POSTERIOR A DATA DE FIM')
+  const supabase = await createClient()
 
   const { data: rows, error } = await supabase
     .from('sessoes')
@@ -616,7 +707,11 @@ export async function listarHistoricoTerapeuta(
   dataInicio: string,
   dataFim: string
 ): Promise<{ sessoes: SessaoHistorico[]; stats: StatsResumo }> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(terapeutaId)) throw new Error('ID DE TERAPEUTA INVALIDO')
+  if (!isValidISODate(dataInicio)) throw new Error('DATA DE INICIO INVALIDA')
+  if (!isValidISODate(dataFim)) throw new Error('DATA DE FIM INVALIDA')
+  if (dataInicio > dataFim) throw new Error('DATA DE INICIO NAO PODE SER POSTERIOR A DATA DE FIM')
+  const supabase = await createClient()
 
   // Busca sessoes onde o terapeuta participou
   const { data: stRows, error: stError } = await supabase
@@ -664,8 +759,12 @@ export async function listarHistoricoTerapeuta(
 }
 
 export async function listarHorariosPadraoTerapeuta(terapeutaId: string, dataReferencia: string): Promise<{ hora_inicio: string; hora_fim: string }[]> {
-  const supabase = createAdminClient()
-  const d = new Date(dataReferencia + 'T00:00:00')
+  if (!isValidUUID(terapeutaId)) throw new Error('ID DE TERAPEUTA INVALIDO')
+  if (!isValidISODate(dataReferencia)) throw new Error('DATA INVALIDA')
+  const supabase = await createClient()
+  // Usa componentes locais para evitar problema de timezone
+  const [ano, mes, dia] = dataReferencia.split('-').map(Number)
+  const d = new Date(ano, mes - 1, dia)
   const diaSemana = d.getDay()
 
   // Busca datas do mesmo dia da semana nas ultimas 4 semanas
@@ -686,7 +785,7 @@ export async function listarHorariosPadraoTerapeuta(terapeutaId: string, dataRef
 
   const horarios = new Map<string, { hora_inicio: string; hora_fim: string }>()
   for (const row of rows || []) {
-    const s = (row as any).sessoes
+    const s = (row as { sessoes?: { hora_inicio: string; hora_fim: string; data: string }[] }).sessoes?.[0]
     if (!s) continue
     const key = `${s.hora_inicio}|${s.hora_fim}`
     if (!horarios.has(key)) {
@@ -694,14 +793,17 @@ export async function listarHorariosPadraoTerapeuta(terapeutaId: string, dataRef
     }
   }
 
-  return Array.from(horarios.values()).sort((a, b) => a.hora_inicio.localeCompare(b.hora_fim))
+  return Array.from(horarios.values()).sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
 }
 
 export async function listarEstatisticasGerais(
   dataInicio: string,
   dataFim: string
 ): Promise<{ stats: StatsResumo; porPaciente: { paciente_id: string; nome: string; total: number; presente: number; taxa: number }[] }> {
-  const supabase = createAdminClient()
+  if (!isValidISODate(dataInicio)) throw new Error('DATA DE INICIO INVALIDA')
+  if (!isValidISODate(dataFim)) throw new Error('DATA DE FIM INVALIDA')
+  if (dataInicio > dataFim) throw new Error('DATA DE INICIO NAO PODE SER POSTERIOR A DATA DE FIM')
+  const supabase = await createClient()
 
   const { data: rows, error } = await supabase
     .from('sessoes')
@@ -726,7 +828,7 @@ export async function listarEstatisticasGerais(
       existente.total++
       if (r.status === 'PRESENTE') existente.presente++
     } else {
-      const pacienteNome = Array.isArray((r as any).patients) ? (r as any).patients[0]?.nome : (r as any).patients?.nome
+      const pacienteNome = Array.isArray((r as { patients?: { nome?: string }[] }).patients) ? (r as { patients?: { nome?: string }[] }).patients?.[0]?.nome : (r as { patients?: { nome?: string } }).patients?.nome
       map.set(pid, {
         nome: pacienteNome || '-',
         total: 1,
@@ -779,7 +881,7 @@ export interface Bloqueio {
 }
 
 export async function listarBloqueios(dataInicio: string, dataFim: string): Promise<Bloqueio[]> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const { data, error } = await supabase.rpc('listar_bloqueios_semana', {
     p_data_inicio: dataInicio,
     p_data_fim: dataFim,
@@ -789,7 +891,7 @@ export async function listarBloqueios(dataInicio: string, dataFim: string): Prom
 }
 
 export async function criarBloqueio(dados: { terapeuta_id: string; data: string; hora_inicio: string; hora_fim: string; motivo?: string }): Promise<Bloqueio> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
 
   // Verifica sobreposicao de bloqueios
   const { data: existentes, error: errExistentes } = await supabase
@@ -810,7 +912,8 @@ export async function criarBloqueio(dados: { terapeuta_id: string; data: string;
     throw new Error('Ja existe um bloqueio neste horario para este terapeuta')
   }
 
-  const dia_semana = new Date(dados.data + 'T00:00:00').getDay()
+  const [ano, mes, dia] = dados.data.split('-').map(Number)
+  const dia_semana = new Date(ano, mes - 1, dia).getDay()
   const { data, error } = await supabase
     .from('bloqueios')
     .insert({ ...dados, dia_semana })
@@ -821,7 +924,8 @@ export async function criarBloqueio(dados: { terapeuta_id: string; data: string;
 }
 
 export async function excluirBloqueio(id: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE BLOQUEIO INVALIDO')
+  const supabase = await createClient()
   const { error } = await supabase.from('bloqueios').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
@@ -845,76 +949,72 @@ export interface AusenciaFormData {
   motivo: string
 }
 
-export async function listarAusencias(): Promise<Ausencia[]> {
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
+export async function listarAusencias(dataInicio?: string, dataFim?: string): Promise<Ausencia[]> {
+  const supabase = await createClient()
+  let query = supabase
     .from('ausencias')
     .select('*')
     .order('data_inicio', { ascending: false })
+
+  if (dataInicio && dataFim) {
+    // Busca ausencias que se sobrepõem ao periodo [dataInicio, dataFim]
+    query = query.lte('data_inicio', dataFim).gte('data_fim', dataInicio)
+  }
+
+  const { data, error } = await query
   if (error) throw new Error(error.message)
   return (data as Ausencia[]) || []
 }
 
 export async function salvarAusencia(dados: AusenciaFormData): Promise<Ausencia> {
-  const supabase = createAdminClient()
-
-  // Validacoes
+  if (!isValidUUID(dados.terapeuta_id)) throw new Error('ID DE TERAPEUTA INVALIDO')
+  if (!isValidISODate(dados.data_inicio)) throw new Error('DATA DE INICIO INVALIDA')
+  if (!isValidISODate(dados.data_fim)) throw new Error('DATA DE FIM INVALIDA')
   if (dados.data_inicio > dados.data_fim) {
     throw new Error('Data de inicio nao pode ser posterior a data de fim')
   }
 
-  // Verifica sobreposicao com ausencias existentes
-  const { data: existentes, error: errExistentes } = await supabase
-    .from('ausencias')
-    .select('id, data_inicio, data_fim')
-    .eq('terapeuta_id', dados.terapeuta_id)
-  if (errExistentes) throw new Error(errExistentes.message)
-
-  const sobreposto = (existentes || []).filter((a: any) => a.id !== dados.id).some((a: any) => {
-    return (dados.data_inicio <= a.data_fim && dados.data_fim >= a.data_inicio)
-  })
-  if (sobreposto) {
-    throw new Error('Ja existe uma ausencia neste periodo para este terapeuta')
-  }
+  const supabase = await createClient()
 
   if (dados.id) {
     const { data, error } = await supabase
-      .from('ausencias')
-      .update({
-        terapeuta_id: dados.terapeuta_id,
-        data_inicio: dados.data_inicio,
-        data_fim: dados.data_fim,
-        motivo: dados.motivo,
+      .rpc('salvar_ausencia', {
+        p_id: dados.id,
+        p_terapeuta_id: dados.terapeuta_id,
+        p_data_inicio: dados.data_inicio,
+        p_data_fim: dados.data_fim,
+        p_motivo: dados.motivo,
       })
-      .eq('id', dados.id)
-      .select()
-      .single()
     if (error) throw new Error(error.message)
     return data as Ausencia
   } else {
     const { data, error } = await supabase
-      .from('ausencias')
-      .insert({
-        terapeuta_id: dados.terapeuta_id,
-        data_inicio: dados.data_inicio,
-        data_fim: dados.data_fim,
-        motivo: dados.motivo,
+      .rpc('salvar_ausencia', {
+        p_id: null,
+        p_terapeuta_id: dados.terapeuta_id,
+        p_data_inicio: dados.data_inicio,
+        p_data_fim: dados.data_fim,
+        p_motivo: dados.motivo,
       })
-      .select()
-      .single()
     if (error) throw new Error(error.message)
     return data as Ausencia
   }
 }
 
 export async function excluirAusencia(id: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(id)) throw new Error('ID DE AUSENCIA INVALIDO')
+  const supabase = await createClient()
   const { error } = await supabase.from('ausencias').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
 
 export async function atualizarStatusTerapeutaSessao(sessaoId: string, terapeutaId: string, status: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(sessaoId)) throw new Error('ID DE SESSAO INVALIDO')
+  if (!isValidUUID(terapeutaId)) throw new Error('ID DE TERAPEUTA INVALIDO')
+  if (!STATUS_SESSAO_VALIDOS.includes(status as (typeof STATUS_SESSAO_VALIDOS)[number])) {
+    throw new Error(`STATUS INVALIDO: ${status}`)
+  }
+  const supabase = await createClient()
   const { error } = await supabase
     .from('sessao_terapeutas')
     .update({ status })
@@ -924,7 +1024,10 @@ export async function atualizarStatusTerapeutaSessao(sessaoId: string, terapeuta
 }
 
 export async function marcarAusenciaProfissional(sessaoId: string, terapeutaId: string, motivo: string): Promise<void> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(sessaoId)) throw new Error('ID DE SESSAO INVALIDO')
+  if (!isValidUUID(terapeutaId)) throw new Error('ID DE TERAPEUTA INVALIDO')
+  if (!motivo || motivo.trim().length === 0) throw new Error('MOTIVO OBRIGATORIO')
+  const supabase = await createClient()
   const observacao = `AUSÊNCIA DO PROFISSIONAL: ${motivo}`
   const { error } = await supabase
     .from('sessao_terapeutas')
@@ -932,10 +1035,22 @@ export async function marcarAusenciaProfissional(sessaoId: string, terapeutaId: 
     .eq('sessao_id', sessaoId)
     .eq('terapeuta_id', terapeutaId)
   if (error) throw new Error(error.message)
+
+  // Se todos os terapeutas da sessao estao com status de ausencia/falta, atualiza sessoes.status
+  const { data: todosTerapeutas } = await supabase
+    .from('sessao_terapeutas')
+    .select('status')
+    .eq('sessao_id', sessaoId)
+  if (todosTerapeutas && todosTerapeutas.length > 0 && todosTerapeutas.every(t => t.status === 'FALTA_PROFISSIONAL' || t.status === 'ATESTADO_PROFISSIONAL')) {
+    await supabase.from('sessoes').update({ status: 'FALTA_PROFISSIONAL' }).eq('id', sessaoId)
+  }
 }
 
 export async function marcarAusenciaProfissionalDia(terapeutaId: string, data: string, motivo: string): Promise<number> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(terapeutaId)) throw new Error('ID DE TERAPEUTA INVALIDO')
+  if (!isValidISODate(data)) throw new Error('DATA INVALIDA')
+  if (!motivo || motivo.trim().length === 0) throw new Error('MOTIVO OBRIGATORIO')
+  const supabase = await createClient()
   const observacao = `AUSÊNCIA DO PROFISSIONAL: ${motivo}`
 
   // Busca todas as sessoes do dia onde o terapeuta participa
@@ -970,11 +1085,23 @@ export async function marcarAusenciaProfissionalDia(terapeutaId: string, data: s
 
   if (updError) throw new Error(updError.message)
 
+  // Para cada sessao afetada, verifica se todos os terapeutas estao ausentes
+  for (const sid of idsDoDia) {
+    const { data: todosTerapeutas } = await supabase
+      .from('sessao_terapeutas')
+      .select('status')
+      .eq('sessao_id', sid)
+    if (todosTerapeutas && todosTerapeutas.length > 0 && todosTerapeutas.every(t => t.status === 'FALTA_PROFISSIONAL' || t.status === 'ATESTADO_PROFISSIONAL')) {
+      await supabase.from('sessoes').update({ status: 'FALTA_PROFISSIONAL' }).eq('id', sid)
+    }
+  }
+
   return idsDoDia.length
 }
 
 export async function marcarTodosPresentesDia(data: string): Promise<number> {
-  const supabase = createAdminClient()
+  if (!isValidISODate(data)) throw new Error('DATA INVALIDA')
+  const supabase = await createClient()
 
   // Busca todas as sessoes do dia
   const { data: sessoesDoDia, error: sError } = await supabase
@@ -996,6 +1123,13 @@ export async function marcarTodosPresentesDia(data: string): Promise<number> {
 
   if (updError) throw new Error(updError.message)
 
+  // Sincroniza sessoes.status para PRESENTE onde ainda esta AGENDADO
+  await supabase
+    .from('sessoes')
+    .update({ status: 'PRESENTE' })
+    .eq('data', data)
+    .eq('status', 'AGENDADO')
+
   // Retorna quantos foram atualizados (contagem aproximada)
   const { count, error: countError } = await supabase
     .from('sessao_terapeutas')
@@ -1008,7 +1142,7 @@ export async function marcarTodosPresentesDia(data: string): Promise<number> {
 }
 
 export async function contarSessoesFuturasDoPaciente(pacienteId: string): Promise<number> {
-  const supabase = createAdminClient()
+  const supabase = await createClient()
   const hoje = new Date()
   const ano = hoje.getFullYear()
   const mes = String(hoje.getMonth() + 1).padStart(2, '0')
@@ -1027,21 +1161,32 @@ export async function contarSessoesFuturasDoPaciente(pacienteId: string): Promis
 }
 
 export async function cancelarSessoesFuturasDoPaciente(pacienteId: string): Promise<number> {
-  const supabase = createAdminClient()
+  if (!isValidUUID(pacienteId)) throw new Error('ID DE PACIENTE INVALIDO')
+  const supabase = await createClient()
   const hoje = new Date()
   const ano = hoje.getFullYear()
   const mes = String(hoje.getMonth() + 1).padStart(2, '0')
   const dia = String(hoje.getDate()).padStart(2, '0')
   const dataHoje = `${ano}-${mes}-${dia}`
 
-  const { data: rows, error } = await supabase
+  // Busca sessoes futuras para preservar observacoes
+  const { data: sessoes, error: selError } = await supabase
     .from('sessoes')
-    .update({ status: 'CANCELADO', observacoes: 'PACIENTE FORA DE TRATAMENTO' })
+    .select('id, observacoes')
     .eq('paciente_id', pacienteId)
     .gte('data', dataHoje)
     .eq('status', 'AGENDADO')
-    .select('id')
 
-  if (error) throw new Error(error.message)
-  return (rows || []).length
+  if (selError) throw new Error(selError.message)
+  if (!sessoes || sessoes.length === 0) return 0
+
+  // Atualiza uma a uma para preservar observacoes existentes
+  for (const s of sessoes) {
+    const novaObs = s.observacoes
+      ? `${s.observacoes} | PACIENTE FORA DE TRATAMENTO`
+      : 'PACIENTE FORA DE TRATAMENTO'
+    await supabase.from('sessoes').update({ status: 'CANCELADO', observacoes: novaObs }).eq('id', s.id)
+  }
+
+  return sessoes.length
 }

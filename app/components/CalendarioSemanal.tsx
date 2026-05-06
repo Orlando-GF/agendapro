@@ -235,14 +235,16 @@ export function CalendarioSemanal({
     const destKey = `${destData}|${destHoraInicio}`
     const bloqueio = bloqueiosPorCelula.get(destKey)
     if (bloqueio) {
-      // Recusa silenciosa — o pai pode mostrar toast se quiser
+      error('NÃO É POSSÍVEL MOVER PARA UM HORÁRIO BLOQUEADO.')
       return
     }
 
     // Verifica bloqueio lógico por dias de trabalho
-    const diaSemanaDest = new Date(destData + 'T00:00:00').getDay()
+    const [anoDest, mesDest, diaDest] = destData.split('-').map(Number)
+    const diaSemanaDest = new Date(anoDest, mesDest - 1, diaDest).getDay()
     const diaIndex = diaSemanaDest === 0 ? 4 : diaSemanaDest - 1
     if (diaIndex >= 0 && diaIndex < DIAS.length && estaBloqueadoLogicamente(DIAS[diaIndex])) {
+      error('NÃO É POSSÍVEL MOVER PARA UM DIA FORA DO EXPEDIENTE DO TERAPEUTA.')
       return
     }
 
@@ -264,6 +266,7 @@ export function CalendarioSemanal({
       )
     } else {
       // Múltiplas sessões no destino — recusa
+      error('NÃO É POSSÍVEL MOVER PARA UMA CÉLULA COM MÚLTIPLAS SESSÕES.')
       return
     }
   }
@@ -315,7 +318,8 @@ export function CalendarioSemanal({
               })
 
               const linhas = ordenadas.map(s => {
-                const d = new Date(s.data + 'T00:00:00')
+                const [anoS, mesS, diaS] = s.data.split('-').map(Number)
+                const d = new Date(anoS, mesS - 1, diaS)
                 const diaSemana = DIAS_SEMANA[d.getDay()]
                 const dataFmt = formatDateBRFromISO(s.data)
                 const nome = s.tipo === 'VAZIO'
@@ -328,7 +332,7 @@ export function CalendarioSemanal({
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;">' + nome + (s.recorrente ? ' ↻' : '') + '</td>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-family:monospace;font-size:8px;">' + (s.tipo === 'SESSAO' ? (s.paciente_codigo || '-') : '') + '</td>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-size:8px;">' + terapeutas + '</td>' +
-                  '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;">' + (s.paciente_em_avaliacao ? 'EM AVALIAÇÃO' : s.status.replace(/_/g, ' ')) + '</td>' +
+
                   '</tr>'
               }).join('')
 
@@ -344,7 +348,7 @@ export function CalendarioSemanal({
                 '.footer { margin-top: 24px; font-size: 8px; color: #666; text-align: center; }' +
                 '</style></head><body>' +
                 '<h1>AGENDA DA SEMANA — ' + formatDateBRFromISO(datasISO[0]) + ' A ' + formatDateBRFromISO(datasISO[4]) + '</h1>' +
-                '<table><thead><tr><th>DIA</th><th>HORÁRIO</th><th>PACIENTE</th><th>PRONTUÁRIO</th><th>TERAPEUTAS</th><th>STATUS</th></tr></thead>' +
+                '<table><thead><tr><th>DIA</th><th>HORÁRIO</th><th>PACIENTE</th><th>PRONTUÁRIO</th><th>TERAPEUTAS</th></tr></thead>' +
                 '<tbody>' + linhas + '</tbody></table>' +
                 '<div class="footer">AGENDAPRO — TEACOLHE</div>' +
                 '<script>window.onload = function() { window.print(); }; window.onafterprint = function() { window.close(); };</script>' +
@@ -423,8 +427,8 @@ export function CalendarioSemanal({
                       const key = `${dataISO}|${h.hora_inicio}`
                       const lista = sessoesPorCelula.get(key) || []
                       const bloqueio = bloqueiosPorCelula.get(key)
-                      const qtd = lista.filter(s => s.tipo === 'SESSAO').length
-                      const listaSessoes = lista.filter(s => s.tipo === 'SESSAO')
+                      const qtd = lista.filter(s => s.tipo && s.tipo !== 'VAZIO').length
+                      const listaSessoes = lista.filter(s => s.tipo && s.tipo !== 'VAZIO')
                       const pred = terapeutaFiltro
                         ? (listaSessoes.map(s => {
                             const t = (s.terapeutas || []).find(t => t.id === terapeutaFiltro)

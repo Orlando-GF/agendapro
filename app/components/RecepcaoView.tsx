@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import { Sessao, Terapeuta, Ausencia, Horario, Bloqueio } from '../actions'
 import { formatDateBR, formatDateISO, formatarAgendaWhatsApp } from '@/lib/date-helpers'
 import { exportarExcel, exportarPDF } from '@/lib/export-utils'
@@ -13,7 +13,6 @@ interface Props {
   horarios: Horario[]
   ausencias?: Ausencia[]
   bloqueios?: Bloqueio[]
-  horariosPadrao?: Map<string, Set<string>>
   dataAtual: Date
   terapeutaFiltro?: string
   onMudarData: (d: Date) => void
@@ -50,6 +49,7 @@ function MenuTerapeutaStatus({
   const [aberto, setAberto] = useState(false)
   const [modalMotivo, setModalMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
+  const [salvando, setSalvando] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
 
@@ -79,13 +79,18 @@ function MenuTerapeutaStatus({
     setAberto(!aberto)
   }
 
-  const handleConfirmarAusencia = () => {
-    if (onMarcarAusencia && motivo.trim()) {
-      onMarcarAusencia(motivo.trim())
+  const handleConfirmarAusencia = async () => {
+    if (onMarcarAusencia && motivo.trim() && !salvando) {
+      setSalvando(true)
+      try {
+        await onMarcarAusencia(motivo.trim())
+      } finally {
+        setSalvando(false)
+        setModalMotivo(false)
+        setMotivo('')
+        setAberto(false)
+      }
     }
-    setModalMotivo(false)
-    setMotivo('')
-    setAberto(false)
   }
 
   return (
@@ -188,10 +193,10 @@ function MenuTerapeutaStatus({
               </button>
               <button
                 onClick={handleConfirmarAusencia}
-                disabled={!motivo.trim()}
+                disabled={!motivo.trim() || salvando}
                 className="px-4 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 font-medium disabled:opacity-50 normal-case"
               >
-                CONFIRMAR
+                {salvando ? 'SALVANDO...' : 'CONFIRMAR'}
               </button>
             </div>
           </div>
@@ -301,9 +306,16 @@ function LinhaSessao({
             EM AVALIAÇÃO
           </span>
         ) : (
-          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
-            {s.status.replace(/_/g, ' ')}
-          </span>
+          <div className="flex flex-col items-center gap-1">
+            <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
+              {s.status.replace(/_/g, ' ')}
+            </span>
+            {(s.terapeutas || []).some(t => t.status === 'FALTA_PROFISSIONAL' || t.status === 'ATESTADO_PROFISSIONAL') && (
+              <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-orange-100 text-orange-700 border border-orange-200">
+                TERAPEUTA AUSENTE
+              </span>
+            )}
+          </div>
         )}
       </td>
       <td className="px-4 py-3">
@@ -377,7 +389,6 @@ export function RecepcaoView({
   horarios,
   ausencias,
   bloqueios,
-  horariosPadrao,
   dataAtual,
   terapeutaFiltro,
   onMudarData,
@@ -393,7 +404,7 @@ export function RecepcaoView({
   const diaSemanaHoje = DIAS_SEMANA[dataAtual.getDay()]
 
   // Verifica se um terapeuta está disponível em um horário específico
-  const terapeutaDisponivel = (terapeutaId: string, horaInicio: string, horaFim: string): boolean => {
+  const terapeutaDisponivel = useCallback((terapeutaId: string, horaInicio: string, horaFim: string): boolean => {
     const t = terapeutas.find(tt => tt.id === terapeutaId)
     if (!t) return false
     if (t.ativo === false) return false
@@ -420,7 +431,7 @@ export function RecepcaoView({
     }
 
     return true
-  }
+  }, [terapeutas, diaSemanaHoje, ausencias, bloqueios, dataISO])
   const { success, error } = useToast()
   const [modo, setModo] = useState<'horario' | 'terapeuta'>('horario')
   const [modalDiaNaoFuncionou, setModalDiaNaoFuncionou] = useState(false)
@@ -443,33 +454,9 @@ export function RecepcaoView({
   }, [sessoesOnly])
 
   const itensPorHorario = useMemo(() => {
-    const map = new Map<string, Sessao>()
-    // Preenche com horários vazios
-    for (const h of horarios) {
-      const key = `${h.hora_inicio}|${h.hora_fim}`
-      map.set(key, {
-        id: `VAZIO-${h.hora_inicio}`,
-        tipo: 'VAZIO',
-        hora_inicio: h.hora_inicio,
-        hora_fim: h.hora_fim,
-        data: '',
-        status: '',
-        paciente_nome: '',
-        paciente_codigo: '',
-        terapeutas: [],
-      })
-    }
-    // Substitui por sessões existentes ou adiciona sessões com horário avulso
-    for (const s of sessoes) {
-      const key = `${s.hora_inicio}|${s.hora_fim}`
-      if (map.has(key)) {
-        map.set(key, s)
-      } else {
-        map.set(s.id, s)
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
-  }, [sessoes, horarios])
+    // Apenas sessões reais, sem preencher horários vazios
+    return [...sessoes].sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
+  }, [sessoes])
 
   const terapeutasHoje = useMemo(() => {
     return terapeutas.filter(t => t.ativo !== false && (t.dias_trabalho || []).includes(diaSemanaHoje))
@@ -560,7 +547,12 @@ export function RecepcaoView({
   }
 
   const imprimirRelatorio = () => {
-    const lista = (terapeutaFiltro ? itensPorHorario.filter(s => s.tipo !== 'VAZIO' && (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : itensPorHorario)
+    const lista = [...itensPorHorario].sort((a, b) => {
+      const codA = a.paciente_codigo || ''
+      const codB = b.paciente_codigo || ''
+      if (codA !== codB) return codA.localeCompare(codB)
+      return a.hora_inicio.localeCompare(b.hora_inicio)
+    })
 
     if (lista.length === 0) {
       alert('Nenhuma sessão para imprimir.')
@@ -570,7 +562,8 @@ export function RecepcaoView({
     const DIAS_SEMANA = ['DOMINGO', 'SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO']
 
     const linhas = lista.map(s => {
-      const d = new Date(s.data + 'T00:00:00')
+      const [anoS, mesS, diaS] = s.data.split('-').map(Number)
+      const d = new Date(anoS, mesS - 1, diaS)
       const diaSemana = DIAS_SEMANA[d.getDay()]
       const [ano, mes, dia] = s.data.split('-')
       const dataFmt = `${dia}/${mes}/${ano}`
@@ -646,7 +639,7 @@ export function RecepcaoView({
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                const lista = (terapeutaFiltro ? itensPorHorario.filter(s => s.tipo !== 'VAZIO' && (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : itensPorHorario)
+                const lista = itensPorHorario
                 const texto = formatarAgendaWhatsApp(lista, `AGENDA DO DIA — ${formatDateBR(dataAtual)}`, horarios)
                 navigator.clipboard.writeText(texto).then(() => success('AGENDA COPIADA PARA O WHATSAPP')).catch(() => error('ERRO AO COPIAR'))
               }}
@@ -662,7 +655,7 @@ export function RecepcaoView({
             </button>
             <button
               onClick={() => {
-                const lista = terapeutaFiltro ? itensPorHorario.filter(s => s.tipo !== 'VAZIO' && (s.terapeutas || []).some(t => t.id === terapeutaFiltro)) : itensPorHorario.filter(s => s.tipo !== 'VAZIO')
+                const lista = itensPorHorario.filter(s => s.tipo !== 'VAZIO')
                 const colunas = [
                   { key: 'hora_inicio' as const, header: 'HORÁRIO' },
                   { key: 'paciente_nome' as const, header: 'PACIENTE' },
@@ -835,7 +828,7 @@ export function RecepcaoView({
               </div>
             </div>
 
-            <TabelaSessoes sessoes={sessoes} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
+            <TabelaSessoes sessoes={itensPorHorario} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
           </>
         ) : (
           <>

@@ -28,14 +28,14 @@ function buildDefaults(paciente: Patient | null | undefined): PatientInput & { i
       codigo: paciente.codigo ?? null,
       telefone: paciente.telefone ?? null,
       responsavel: paciente.responsavel ?? null,
-      horario_padrao: paciente.horario_padrao ?? null,
+
       ativo: paciente.ativo ?? true,
       em_avaliacao: paciente.em_avaliacao ?? false,
       whatsapp_adicionado: paciente.whatsapp_adicionado ?? false,
       judicial: paciente.judicial ?? false,
       laudo: paciente.laudo ?? false,
       observacoes: paciente.observacoes ?? null,
-      status_tratamento: (paciente.status_tratamento as any) ?? 'EM_TRATAMENTO',
+      status_tratamento: paciente.status_tratamento ?? 'EM_TRATAMENTO',
       motivo_saida: paciente.motivo_saida ?? null,
       data_saida: paciente.data_saida ?? null,
     }
@@ -45,7 +45,7 @@ function buildDefaults(paciente: Patient | null | undefined): PatientInput & { i
     codigo: null,
     telefone: null,
     responsavel: null,
-    horario_padrao: null,
+
     ativo: true,
     em_avaliacao: false,
     whatsapp_adicionado: false,
@@ -80,6 +80,7 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
   return (
     <SidepanelContainer titulo={paciente ? 'EDITAR PACIENTE' : 'NOVO PACIENTE'} onFechar={onCancelar}>
       <form
+        id="form-paciente"
         onSubmit={handleSubmit(onSalvar)}
         className="flex-1 overflow-y-auto p-6 space-y-5"
       >
@@ -287,7 +288,7 @@ export function PacienteForm({ paciente, onSalvar, onCancelar }: Props) {
         </button>
         <button
           type="submit"
-          onClick={handleSubmit(onSalvar)}
+          form="form-paciente"
           disabled={isSubmitting}
           className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed normal-case"
         >

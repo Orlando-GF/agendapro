@@ -1,18 +1,29 @@
 'use client'
 
 import { Patient } from '../actions'
+import { useMemo } from 'react'
+import { STATUS_CONFIG } from '@/lib/status-helpers'
 
 interface Props {
   pacientes: Patient[]
   page: number
   hasMore: boolean
   total: number
+  loading?: boolean
   onEditar: (p: Patient) => void
   onExcluir: (id: string) => void
   onMudarPagina: (page: number) => void
 }
 
-export function PacienteTable({ pacientes, page, hasMore, total, onEditar, onExcluir, onMudarPagina }: Props) {
+export function PacienteTable({ pacientes, page, hasMore, total, loading, onEditar, onExcluir, onMudarPagina }: Props) {
+  if (loading) {
+    return (
+      <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
+        CARREGANDO PACIENTES...
+      </div>
+    )
+  }
+
   if (pacientes.length === 0) {
     return (
       <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
@@ -20,6 +31,15 @@ export function PacienteTable({ pacientes, page, hasMore, total, onEditar, onExc
       </div>
     )
   }
+
+  const pacientesOrdenados = useMemo(() => {
+    return [...pacientes].sort((a, b) => {
+      const aAtivo = (a.status_tratamento ?? 'EM_TRATAMENTO') === 'EM_TRATAMENTO'
+      const bAtivo = (b.status_tratamento ?? 'EM_TRATAMENTO') === 'EM_TRATAMENTO'
+      if (aAtivo === bAtivo) return a.nome.localeCompare(b.nome)
+      return aAtivo ? -1 : 1
+    })
+  }, [pacientes])
 
   return (
     <div className="bg-white rounded-lg border overflow-hidden">
@@ -40,12 +60,7 @@ export function PacienteTable({ pacientes, page, hasMore, total, onEditar, onExc
             </tr>
           </thead>
           <tbody className="divide-y">
-            {[...pacientes].sort((a, b) => {
-              const aAtivo = (a.status_tratamento ?? 'EM_TRATAMENTO') === 'EM_TRATAMENTO'
-              const bAtivo = (b.status_tratamento ?? 'EM_TRATAMENTO') === 'EM_TRATAMENTO'
-              if (aAtivo === bAtivo) return a.nome.localeCompare(b.nome)
-              return aAtivo ? -1 : 1
-            }).map(p => (
+            {pacientesOrdenados.map(p => (
               <tr key={p.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 font-medium text-gray-900">{p.nome}</td>
                 <td className="px-4 py-3 text-gray-600">{p.codigo || '-'}</td>
@@ -54,15 +69,10 @@ export function PacienteTable({ pacientes, page, hasMore, total, onEditar, onExc
                 <td className="px-4 py-3 text-center">
                   {(() => {
                     const status = p.status_tratamento ?? 'EM_TRATAMENTO'
-                    const cores: Record<string, string> = {
-                      EM_TRATAMENTO: 'bg-green-50 text-green-700 border-green-200',
-                      ALTA: 'bg-blue-50 text-blue-700 border-blue-200',
-                      DESISTIU: 'bg-red-50 text-red-700 border-red-200',
-                      MUDANCA: 'bg-orange-50 text-orange-700 border-orange-200',
-                    }
+                    const cfg = STATUS_CONFIG[status]
                     return (
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cores[status] || cores.EM_TRATAMENTO}`}>
-                        {status.replace('_', ' ')}
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg?.cor || 'bg-gray-50 text-gray-700 border-gray-200'}`}>
+                        {cfg?.label || status.replace(/_/g, ' ')}
                       </span>
                     )
                   })()}

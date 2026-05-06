@@ -11,7 +11,7 @@ export interface Patient {
   judicial?: boolean | null
   laudo?: boolean | null
   observacoes?: string | null
-  status_tratamento?: string | null
+  status_tratamento?: 'EM_TRATAMENTO' | 'ALTA' | 'DESISTIU' | 'MUDANCA' | null
   motivo_saida?: string | null
   data_saida?: string | null
   created_at?: string | null
