@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   listarPacientes, salvarPaciente, excluirPaciente, contarPacientes, buscarPacientePorId,
   listarTerapeutas, salvarTerapeuta, excluirTerapeuta,
@@ -93,6 +94,7 @@ function CadastroTeacolheInner({
   initialHorarios,
   initialStats,
 }: InitialData) {
+  const queryClient = useQueryClient()
   const { success, error: toastError } = useToast()
   const [view, setView] = useState<View>('agenda')
   const [sidepanelAberto, setSidepanelAberto] = useState(false)
@@ -283,11 +285,16 @@ function CadastroTeacolheInner({
   }
 
   const handleMudarStatusSessao = async (id: string, status: string, justificativa?: string) => {
+    if (submitting) return
     setSubmitting(true)
     try {
       await atualizarStatusSessao(id, status, justificativa)
       success('Status atualizado')
-      await recarregarView()
+      // Invalidação seletiva em background — não bloqueia a UI
+      const dataISO = formatDateISO(dataRecepcao)
+      queryClient.invalidateQueries({ queryKey: ['recepcao', 'sessoes', dataISO] })
+      queryClient.invalidateQueries({ queryKey: ['agenda'] })
+      queryClient.invalidateQueries({ queryKey: ['relatorios'] })
     } catch (err: any) {
       toastError(err.message)
     } finally {
@@ -296,11 +303,15 @@ function CadastroTeacolheInner({
   }
 
   const handleMudarStatusTerapeuta = async (sessaoId: string, terapeutaId: string, status: string) => {
+    if (submitting) return
     setSubmitting(true)
     try {
       await atualizarStatusTerapeutaSessao(sessaoId, terapeutaId, status)
       success('Status do terapeuta atualizado')
-      await recarregarView()
+      const dataISO = formatDateISO(dataRecepcao)
+      queryClient.invalidateQueries({ queryKey: ['recepcao', 'sessoes', dataISO] })
+      queryClient.invalidateQueries({ queryKey: ['agenda'] })
+      queryClient.invalidateQueries({ queryKey: ['relatorios'] })
     } catch (err: any) {
       toastError(err.message)
     } finally {
@@ -309,11 +320,16 @@ function CadastroTeacolheInner({
   }
 
   const handleMarcarAusenciaProfissional = async (sessaoId: string, terapeutaId: string, motivo: string) => {
+    if (submitting) return
     setSubmitting(true)
     try {
       await marcarAusenciaProfissional(sessaoId, terapeutaId, motivo)
       success('Ausência do profissional registrada')
-      await recarregarView()
+      const dataISO = formatDateISO(dataRecepcao)
+      queryClient.invalidateQueries({ queryKey: ['recepcao', 'sessoes', dataISO] })
+      queryClient.invalidateQueries({ queryKey: ['recepcao', 'ausencias', dataISO] })
+      queryClient.invalidateQueries({ queryKey: ['agenda'] })
+      queryClient.invalidateQueries({ queryKey: ['relatorios'] })
     } catch (err: any) {
       toastError(err.message)
     } finally {
@@ -321,7 +337,8 @@ function CadastroTeacolheInner({
     }
   }
 
-  const handleMarcarAusenciaProfissionalDia = async (terapeutaId: string, data: string, motivo: string) => {
+  const handleMarcarAusenciaProfissionalDia = async (terapeutaId: string, data: string, motivo: string): Promise<number> => {
+    if (submitting) return 0
     setSubmitting(true)
     try {
       const qtd = await marcarAusenciaProfissionalDia(terapeutaId, data, motivo)
@@ -336,7 +353,8 @@ function CadastroTeacolheInner({
     }
   }
 
-  const handleMarcarTodosPresentes = async (data: string) => {
+  const handleMarcarTodosPresentes = async (data: string): Promise<number> => {
+    if (submitting) return 0
     setSubmitting(true)
     try {
       const qtd = await marcarTodosPresentesDia(data)
@@ -353,6 +371,7 @@ function CadastroTeacolheInner({
   }
 
   const handleCancelarDia = async (data: string, motivo: string) => {
+    if (submitting) return
     setSubmitting(true)
     try {
       const qtd = await cancelarSessoesDoDia(data, motivo)

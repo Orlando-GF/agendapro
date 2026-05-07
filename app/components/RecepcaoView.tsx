@@ -633,7 +633,41 @@ export function RecepcaoView({
   const [modalMarcarTodosPresentes, setModalMarcarTodosPresentes] = useState(false)
   const [marcandoPresentes, setMarcandoPresentes] = useState(false)
 
-  const sessoesOnly = useMemo(() => sessoes.filter(s => s.tipo === 'SESSAO'), [sessoes])
+  // UI Otimista: status temporários que mudam instantaneamente na tela
+  const [statusOtimistas, setStatusOtimistas] = useState<Map<string, string>>(new Map())
+
+  // Sincroniza: remove do Map os status que já foram confirmados pelo servidor
+  useEffect(() => {
+    setStatusOtimistas(prev => {
+      const next = new Map(prev)
+      for (const [id, status] of next) {
+        const real = sessoes.find(s => s.id === id)
+        if (real && real.status === status) {
+          next.delete(id)
+        }
+      }
+      return next
+    })
+  }, [sessoes])
+
+  const handleMudarStatusLocal = (id: string, status: string, justificativa?: string) => {
+    setStatusOtimistas(prev => new Map(prev).set(id, status))
+    onMudarStatus(id, status, justificativa)
+  }
+
+  // Sessões visíveis com status otimistas aplicados (usado na renderização)
+  const sessoesVisiveis = useMemo(() => {
+    if (statusOtimistas.size === 0) return sessoes
+    return sessoes.map(s => {
+      const statusOtimista = statusOtimistas.get(s.id)
+      if (statusOtimista && statusOtimista !== s.status) {
+        return { ...s, status: statusOtimista }
+      }
+      return s
+    })
+  }, [sessoes, statusOtimistas])
+
+  const sessoesOnly = useMemo(() => sessoesVisiveis.filter(s => s.tipo === 'SESSAO'), [sessoesVisiveis])
 
   const stats = useMemo(() => {
     const total = sessoesOnly.length
@@ -648,8 +682,8 @@ export function RecepcaoView({
 
   const itensPorHorario = useMemo(() => {
     // Apenas sessões reais, sem preencher horários vazios
-    return [...sessoes].sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
-  }, [sessoes])
+    return [...sessoesVisiveis].sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
+  }, [sessoesVisiveis])
 
   const terapeutasHoje = useMemo(() => {
     return terapeutas.filter(t => t.ativo !== false && (t.dias_trabalho || []).includes(diaSemanaHoje))
@@ -657,7 +691,7 @@ export function RecepcaoView({
 
   const sessoesPorEquipe = useMemo(() => {
     const map = new Map<string, { nomes: string; temInativo: boolean; sessoes: Sessao[] }>()
-    for (const s of sessoes) {
+    for (const s of sessoesVisiveis) {
       const ts = s.terapeutas || []
       if (ts.length === 0) continue
       const chave = ts.map(t => t.id).sort().join('+')
@@ -675,7 +709,7 @@ export function RecepcaoView({
       grupo.sessoes.sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio))
     }
     return map
-  }, [sessoes])
+  }, [sessoesVisiveis])
 
   const sessoesPorEquipeCompletas = useMemo(() => {
     const map = new Map<string, { nomes: string; temInativo: boolean; sessoes: Sessao[] }>()
@@ -1025,7 +1059,7 @@ export function RecepcaoView({
               </div>
             </div>
 
-            <TabelaSessoes sessoes={itensPorHorario} terapeutasHoje={terapeutasHoje} onMudarStatus={onMudarStatus} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
+            <TabelaSessoes sessoes={itensPorHorario} terapeutasHoje={terapeutasHoje} onMudarStatus={handleMudarStatusLocal} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
           </>
         ) : (
           <>
@@ -1035,8 +1069,8 @@ export function RecepcaoView({
                 const lista = grupo.sessoes
                 const dataISO = formatDateISO(dataAtual)
 
-                // Usa os terapeutas da primeira sessão REAL do grupo
-                const terapeutasDoGrupo = lista.find(s => s.tipo === 'SESSAO')?.terapeutas || []
+                // Usa os terapeutas da primeira sessão não-vazia do grupo
+                const terapeutasDoGrupo = lista.find(s => s.tipo !== 'VAZIO')?.terapeutas || lista[0]?.terapeutas || []
 
                 return (
                   <div key={grupo.nomes} className="bg-white rounded-lg border overflow-hidden">
@@ -1069,7 +1103,7 @@ export function RecepcaoView({
                                 </>
                               )}
                               <MenuTerapeutaStatus
-                                sessaoId={lista.find(s => s.tipo === 'SESSAO')?.id || lista[0]?.id || ''}
+                                sessaoId={lista.find(s => s.tipo !== 'VAZIO')?.id || lista[0]?.id || ''}
                                 terapeuta={t}
                                 onMudarStatus={onMudarStatusTerapeuta}
                                 onMarcarAusencia={onMarcarAusenciaProfissionalDia ? (motivo) => {
@@ -1083,7 +1117,7 @@ export function RecepcaoView({
                           )
                         })}
                       </div>
-                      <div className="text-xs text-gray-500">{lista.filter(s => s.tipo === 'SESSAO').length} SESSÕES</div>
+                      <div className="text-xs text-gray-500">{lista.filter(s => s.tipo !== 'VAZIO').length} SESSÕES</div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -1155,7 +1189,7 @@ export function RecepcaoView({
                                     {ACOES_PRINCIPAIS.map(a => (
                                       <button
                                         key={a.status}
-                                        onClick={() => onMudarStatus(s.id, a.status)}
+                                        onClick={() => handleMudarStatusLocal(s.id, a.status)}
                                         disabled={s.status === a.status || emAvaliacao}
                                         title={emAvaliacao ? 'Paciente em avaliação' : undefined}
                                         className={`px-2 py-1 text-[10px] rounded border font-medium normal-case transition-colors ${
@@ -1171,7 +1205,7 @@ export function RecepcaoView({
                                       sessaoId={s.id}
                                       statusAtual={s.status}
                                       emAvaliacao={emAvaliacao}
-                                      onMudarStatus={onMudarStatus}
+                                      onMudarStatus={handleMudarStatusLocal}
                                     />
                                   </div>
                                 </td>

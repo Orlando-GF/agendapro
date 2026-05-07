@@ -314,10 +314,19 @@ export function CalendarioSemanal({
               const DIAS_SEMANA = ['DOMINGO', 'SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO']
 
               const ordenadas = [...lista].sort((a, b) => {
+                // No filtro "Todos", ordena por dia, depois por profissional, depois por horário
+                if (!terapeutaFiltro) {
+                  if (a.data !== b.data) return a.data.localeCompare(b.data)
+                  const ta = (a.terapeutas || []).map(t => t.nome).sort().join(', ') || ''
+                  const tb = (b.terapeutas || []).map(t => t.nome).sort().join(', ') || ''
+                  if (ta !== tb) return ta.localeCompare(tb)
+                }
                 const da = a.data + '|' + a.hora_inicio
                 const db = b.data + '|' + b.hora_inicio
                 return da.localeCompare(db)
               })
+
+              const thStatus = !terapeutaFiltro ? '<th>STATUS</th>' : ''
 
               const linhas = ordenadas.map(s => {
                 const [anoS, mesS, diaS] = s.data.split('-').map(Number)
@@ -328,13 +337,16 @@ export function CalendarioSemanal({
                   ? '<span style="color:#999;font-style:italic;">— HORÁRIO VAGO —</span>'
                   : (s.tipo !== 'SESSAO' ? (s.titulo || s.tipo) : (s.paciente_nome || 'Sem nome'))
                 const terapeutas = (s.terapeutas || []).map(t => t.nome + (t.ativo === false ? ' (INATIVO)' : '')).join(', ')
+                const tdStatus = !terapeutaFiltro
+                  ? '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-size:8px;white-space:nowrap;">' + (s.status || '-') + '</td>'
+                  : ''
                 return '<tr>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;"><strong>' + diaSemana + '</strong><br><span style="font-size:8px;color:#666;">' + dataFmt + '</span></td>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;">' + s.hora_inicio.slice(0, 5) + ' — ' + s.hora_fim.slice(0, 5) + '</td>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;">' + nome + (s.recorrente ? ' ↻' : '') + '</td>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-family:monospace;font-size:8px;">' + (s.tipo === 'SESSAO' ? (s.paciente_codigo || '-') : '') + '</td>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;font-size:8px;">' + terapeutas + '</td>' +
-
+                  tdStatus +
                   '</tr>'
               }).join('')
 
@@ -351,7 +363,7 @@ export function CalendarioSemanal({
                 '.footer { margin-top: 24px; font-size: 8px; color: #666; text-align: center; }' +
                 '</style></head><body>' +
                 '<h1>' + tituloAgenda + ' — ' + formatDateBRFromISO(datasISO[0]) + ' A ' + formatDateBRFromISO(datasISO[4]) + '</h1>' +
-                '<table><thead><tr><th>DIA</th><th>HORÁRIO</th><th>PACIENTE</th><th>PRONTUÁRIO</th><th>TERAPEUTAS</th></tr></thead>' +
+                '<table><thead><tr><th>DIA</th><th>HORÁRIO</th><th>PACIENTE</th><th>PRONTUÁRIO</th><th>TERAPEUTAS</th>' + thStatus + '</tr></thead>' +
                 '<tbody>' + linhas + '</tbody></table>' +
                 '<div class="footer">AGENDAPRO — TEACOLHE</div>' +
                 '<script>window.onload = function() { window.print(); }; window.onafterprint = function() { window.close(); };</script>' +
