@@ -40,6 +40,7 @@ interface Props {
   bloqueios: Bloqueio[]
   ausencias?: Ausencia[]
   terapeutaFiltro: string
+  terapeutaFiltroNome?: string
   diasTrabalho?: string[] | null
   semanaAtual: Date
   onMudarSemana: (d: Date) => void
@@ -132,6 +133,7 @@ export function CalendarioSemanal({
   bloqueios,
   ausencias,
   terapeutaFiltro,
+  terapeutaFiltroNome,
   diasTrabalho,
   semanaAtual,
   onMudarSemana,
@@ -325,7 +327,7 @@ export function CalendarioSemanal({
                 const nome = s.tipo === 'VAZIO'
                   ? '<span style="color:#999;font-style:italic;">— HORÁRIO VAGO —</span>'
                   : (s.tipo !== 'SESSAO' ? (s.titulo || s.tipo) : (s.paciente_nome || 'Sem nome'))
-                const terapeutas = (s.terapeutas || []).map(t => t.nome).join(', ')
+                const terapeutas = (s.terapeutas || []).map(t => t.nome + (t.ativo === false ? ' (INATIVO)' : '')).join(', ')
                 return '<tr>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;"><strong>' + diaSemana + '</strong><br><span style="font-size:8px;color:#666;">' + dataFmt + '</span></td>' +
                   '<td style="padding:4px 6px;border-bottom:1px solid #ccc;white-space:nowrap;">' + s.hora_inicio.slice(0, 5) + ' — ' + s.hora_fim.slice(0, 5) + '</td>' +
@@ -336,7 +338,8 @@ export function CalendarioSemanal({
                   '</tr>'
               }).join('')
 
-              const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>AGENDA DA SEMANA</title>' +
+              const tituloAgenda = terapeutaFiltroNome ? 'AGENDA DE ' + terapeutaFiltroNome.toUpperCase() : 'AGENDA DA SEMANA'
+              const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + tituloAgenda + '</title>' +
                 '<style>' +
                 '@page { margin: 8mm; }' +
                 'body { font-family: Arial, sans-serif; font-size: 9px; line-height: 1.3; margin: 0; padding: 16px; background: white; color: black; }' +
@@ -347,7 +350,7 @@ export function CalendarioSemanal({
                 'tr { page-break-inside: avoid; }' +
                 '.footer { margin-top: 24px; font-size: 8px; color: #666; text-align: center; }' +
                 '</style></head><body>' +
-                '<h1>AGENDA DA SEMANA — ' + formatDateBRFromISO(datasISO[0]) + ' A ' + formatDateBRFromISO(datasISO[4]) + '</h1>' +
+                '<h1>' + tituloAgenda + ' — ' + formatDateBRFromISO(datasISO[0]) + ' A ' + formatDateBRFromISO(datasISO[4]) + '</h1>' +
                 '<table><thead><tr><th>DIA</th><th>HORÁRIO</th><th>PACIENTE</th><th>PRONTUÁRIO</th><th>TERAPEUTAS</th></tr></thead>' +
                 '<tbody>' + linhas + '</tbody></table>' +
                 '<div class="footer">AGENDAPRO — TEACOLHE</div>' +
@@ -515,7 +518,14 @@ export function CalendarioSemanal({
                                   {lista[0].tipo !== 'SESSAO' ? (lista[0].titulo || lista[0].tipo) : lista[0].paciente_nome}
                                 </div>
                                 <div className="text-[10px] opacity-70 truncate">
-                                  {(lista[0].terapeutas || []).map(t => t.nome.split(' ')[0] + (t.ativo === false ? '*' : '')).join(', ')}
+                                  {(lista[0].terapeutas || []).map(t => (
+                                    <span key={t.id} className={t.ativo === false ? 'text-red-500 line-through' : ''}>
+                                      {t.nome.split(' ')[0]}
+                                      {t.ativo === false && (
+                                        <span className="ml-0.5 inline-block px-1 py-0 rounded text-[8px] font-medium bg-red-100 text-red-700 border border-red-200">INATIVO</span>
+                                      )}
+                                    </span>
+                                  )).reduce((prev, curr) => <>{prev}{prev ? ', ' : ''}{curr}</>, null as React.ReactNode)}
                                 </div>
                               </>
                             ) : (
@@ -556,7 +566,14 @@ export function CalendarioSemanal({
                 {activeSessao.tipo !== 'SESSAO' ? (activeSessao.titulo || activeSessao.tipo) : activeSessao.paciente_nome}
               </div>
               <div className="text-[10px] text-gray-500 truncate">
-                {(activeSessao.terapeutas || []).map(t => t.nome.split(' ')[0] + (t.ativo === false ? '*' : '')).join(', ')}
+                {(activeSessao.terapeutas || []).map(t => (
+                  <span key={t.id} className={t.ativo === false ? 'text-red-500 line-through' : ''}>
+                    {t.nome.split(' ')[0]}
+                    {t.ativo === false && (
+                      <span className="ml-0.5 inline-block px-1 py-0 rounded text-[8px] font-medium bg-red-100 text-red-700 border border-red-200">INATIVO</span>
+                    )}
+                  </span>
+                )).reduce((prev, curr) => <>{prev}{prev ? ', ' : ''}{curr}</>, null as React.ReactNode)}
               </div>
             </div>
           ) : null}

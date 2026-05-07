@@ -282,10 +282,10 @@ function CadastroTeacolheInner({
     }
   }
 
-  const handleMudarStatusSessao = async (id: string, status: string) => {
+  const handleMudarStatusSessao = async (id: string, status: string, justificativa?: string) => {
     setSubmitting(true)
     try {
-      await atualizarStatusSessao(id, status)
+      await atualizarStatusSessao(id, status, justificativa)
       success('Status atualizado')
       await recarregarView()
     } catch (err: any) {
@@ -472,6 +472,7 @@ function CadastroTeacolheInner({
                   bloqueios={bloqueios}
                   ausencias={ausencias}
                   terapeutaFiltro={terapeutaFiltro}
+                  terapeutaFiltroNome={terapeutas.find(t => t.id === terapeutaFiltro)?.nome}
                   diasTrabalho={terapeutas.find(t => t.id === terapeutaFiltro)?.dias_trabalho}
                   semanaAtual={semanaAtual}
                   onMudarSemana={setSemanaAtual}

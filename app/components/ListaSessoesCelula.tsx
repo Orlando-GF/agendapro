@@ -40,7 +40,14 @@ export function ListaSessoesCelula({ data, horaInicio, horaFim, sessoes, onEdita
               </span>
             </div>
             <div className="text-xs text-gray-600 mt-1">
-              {(s.terapeutas || []).map(t => t.nome + (t.ativo === false ? '*' : '')).join(', ')}
+              {(s.terapeutas || []).map(t => (
+                <span key={t.id} className={t.ativo === false ? 'text-red-500 line-through' : ''}>
+                  {t.nome}
+                  {t.ativo === false && (
+                    <span className="ml-1 inline-block px-1 py-0 rounded text-[8px] font-medium bg-red-100 text-red-700 border border-red-200">INATIVO</span>
+                  )}
+                </span>
+              )).reduce((prev, curr) => <>{prev}{prev ? ', ' : ''}{curr}</>, null as React.ReactNode)}
             </div>
             {s.observacoes && (
               <div className="text-[10px] text-gray-500 mt-1 italic">{s.observacoes}</div>

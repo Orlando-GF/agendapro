@@ -5,7 +5,7 @@ import { Sessao, Terapeuta, Ausencia, Horario, Bloqueio } from '../actions'
 import { formatDateBR, formatDateISO, formatarAgendaWhatsApp } from '@/lib/date-helpers'
 import { exportarExcel, exportarPDF } from '@/lib/export-utils'
 import { useToast } from '../hooks/useToast'
-import { STATUS_CONFIG, STATUS_TERAPETA_CONFIG, extrairMotivoAusencia } from '@/lib/status-helpers'
+import { STATUS_CONFIG, STATUS_TERAPETA_CONFIG, STATUS_COR, extrairMotivoAusencia } from '@/lib/status-helpers'
 
 interface Props {
   sessoes: Sessao[]
@@ -16,7 +16,7 @@ interface Props {
   dataAtual: Date
   terapeutaFiltro?: string
   onMudarData: (d: Date) => void
-  onMudarStatus: (id: string, status: string) => void
+  onMudarStatus: (id: string, status: string, justificativa?: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
   onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => Promise<void>
   onMarcarAusenciaProfissionalDia?: (terapeutaId: string, data: string, motivo: string) => Promise<number>
@@ -25,15 +25,192 @@ interface Props {
   onMarcarTodosPresentes?: (data: string) => Promise<number>
 }
 
-const ACOES = [
+const ACOES_PRINCIPAIS = [
   { status: 'PRESENTE', label: 'PRESENTE' },
   { status: 'FALTA', label: 'FALTA' },
-  { status: 'FALTA_JUSTIFICADA', label: 'FALTA JUST.' },
+]
+
+const ACOES_EXTRA = [
+  { status: 'FALTA_JUSTIFICADA', label: 'FALTA JUSTIFICADA', requerJustificativa: true },
   { status: 'ATESTADO', label: 'ATESTADO' },
   { status: 'CANCELADO', label: 'CANCELAR' },
 ]
 
+function MenuAcoesPaciente({
+  sessaoId,
+  statusAtual,
+  emAvaliacao,
+  onMudarStatus,
+}: {
+  sessaoId: string
+  statusAtual: string
+  emAvaliacao: boolean
+  onMudarStatus: (id: string, status: string, justificativa?: string) => void
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [modalJustificativa, setModalJustificativa] = useState(false)
+  const [justificativa, setJustificativa] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
 
+  useEffect(() => {
+    if (!aberto) return
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node
+      if (btnRef.current && !btnRef.current.contains(target)) {
+        const dropdown = document.getElementById(`dropdown-acoes-${sessaoId}`)
+        if (!dropdown || !dropdown.contains(target)) {
+          setAberto(false)
+        }
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [aberto, sessaoId])
+
+  const handleBtnClick = () => {
+    if (!aberto && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      const dropdownWidth = 180
+      const dropdownHeight = 200
+      let left = rect.left
+      let top = rect.bottom + 4
+      // Evita transbordar para a direita
+      if (left + dropdownWidth > window.innerWidth) {
+        left = window.innerWidth - dropdownWidth - 8
+      }
+      // Evita transbordar para baixo
+      if (top + dropdownHeight > window.innerHeight) {
+        top = rect.top - dropdownHeight - 4
+      }
+      setPos({ top, left })
+    }
+    setAberto(!aberto)
+  }
+
+  const handleAcao = (status: string, requerJustificativa?: boolean) => {
+    if (emAvaliacao) return
+    if (requerJustificativa) {
+      setModalJustificativa(true)
+      setAberto(false)
+    } else {
+      onMudarStatus(sessaoId, status)
+      setAberto(false)
+    }
+  }
+
+  const handleConfirmarJustificativa = async () => {
+    if (justificativa.trim() && !salvando) {
+      setSalvando(true)
+      try {
+        onMudarStatus(sessaoId, 'FALTA_JUSTIFICADA', justificativa.trim())
+      } finally {
+        setSalvando(false)
+        setModalJustificativa(false)
+        setJustificativa('')
+      }
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={handleBtnClick}
+        disabled={emAvaliacao}
+        title={emAvaliacao ? 'Paciente em avaliação' : 'Mais ações'}
+        className={`px-2 py-1 text-[10px] rounded border font-medium normal-case transition-colors ${
+          emAvaliacao
+            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default opacity-60'
+            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 cursor-pointer'
+        }`}
+      >
+        ⋯
+      </button>
+      {aberto && pos && (
+        <div
+          id={`dropdown-acoes-${sessaoId}`}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
+          className="bg-white border rounded-lg shadow-lg py-1 min-w-[180px]"
+        >
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b mb-1">
+            AÇÕES
+          </div>
+          {ACOES_EXTRA.map(a => (
+            <button
+              key={a.status}
+              onClick={() => handleAcao(a.status, a.requerJustificativa)}
+              disabled={statusAtual === a.status || emAvaliacao}
+              className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors ${
+                statusAtual === a.status || emAvaliacao
+                  ? 'opacity-40 cursor-default text-gray-400'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {a.label}
+              {statusAtual === a.status && ' ✓'}
+            </button>
+          ))}
+          <div className="border-t mt-1 pt-1">
+            <button
+              onClick={() => {
+                onMudarStatus(sessaoId, 'AGENDADO')
+                setAberto(false)
+              }}
+              disabled={statusAtual === 'AGENDADO' || emAvaliacao}
+              className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors ${
+                statusAtual === 'AGENDADO' || emAvaliacao
+                  ? 'opacity-40 cursor-default text-gray-400'
+                  : 'text-red-600 hover:bg-red-50'
+              }`}
+            >
+              LIMPAR
+              {statusAtual === 'AGENDADO' && ' ✓'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de justificativa */}
+      {modalJustificativa && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000]">
+          <div className="bg-white rounded-lg border p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900">Falta Justificada</h3>
+            <p className="text-sm text-gray-600">
+              Informe o motivo da falta justificada do paciente.
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">MOTIVO</label>
+              <input
+                type="text"
+                value={justificativa}
+                onChange={e => setJustificativa(e.target.value)}
+                placeholder="Ex: consulta médica, viagem..."
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => { setModalJustificativa(false); setJustificativa('') }}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium normal-case"
+              >
+                CANCELAR
+              </button>
+              <button
+                onClick={handleConfirmarJustificativa}
+                disabled={!justificativa.trim() || salvando}
+                className="px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 font-medium disabled:opacity-50 normal-case"
+              >
+                {salvando ? 'SALVANDO...' : 'CONFIRMAR'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 function MenuTerapeutaStatus({
   sessaoId,
@@ -74,7 +251,19 @@ function MenuTerapeutaStatus({
   const handleBtnClick = () => {
     if (!aberto && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect()
-      setPos({ top: rect.bottom + 4, left: rect.left })
+      const dropdownWidth = 180
+      const dropdownHeight = 140
+      let left = rect.left
+      let top = rect.bottom + 4
+      // Evita transbordar para a direita
+      if (left + dropdownWidth > window.innerWidth) {
+        left = window.innerWidth - dropdownWidth - 8
+      }
+      // Evita transbordar para baixo
+      if (top + dropdownHeight > window.innerHeight) {
+        top = rect.top - dropdownHeight - 4
+      }
+      setPos({ top, left })
     }
     setAberto(!aberto)
   }
@@ -218,7 +407,7 @@ function LinhaSessao({
 }: {
   s: Sessao
   terapeutasHoje: Terapeuta[]
-  onMudarStatus: (id: string, status: string) => void
+  onMudarStatus: (id: string, status: string, justificativa?: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
   onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => void
   onEditarPaciente?: (pacienteId: string) => void
@@ -305,23 +494,20 @@ function LinhaSessao({
           <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
             EM AVALIAÇÃO
           </span>
+        ) : s.motivoDiaNaoFuncionou ? (
+          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${STATUS_COR.FERIADO}`}>
+            {s.motivoDiaNaoFuncionou}
+          </span>
         ) : (
-          <div className="flex flex-col items-center gap-1">
-            <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
-              {s.status.replace(/_/g, ' ')}
-            </span>
-            {(s.terapeutas || []).some(t => t.status === 'FALTA_PROFISSIONAL' || t.status === 'ATESTADO_PROFISSIONAL') && (
-              <span className="inline-block px-1.5 py-0 rounded text-[9px] font-medium bg-orange-100 text-orange-700 border border-orange-200">
-                TERAPEUTA AUSENTE
-              </span>
-            )}
-          </div>
+          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${cfg.cor}`}>
+            {s.status.replace(/_/g, ' ')}
+          </span>
         )}
       </td>
       <td className="px-4 py-3">
         {s.tipo === 'VAZIO' ? null : (
-          <div className="flex justify-center gap-1 flex-wrap print-hidden">
-            {ACOES.map(a => (
+          <div className="flex justify-center gap-1 flex-wrap print-hidden items-center">
+            {ACOES_PRINCIPAIS.map(a => (
               <button
                 key={a.status}
                 onClick={() => onMudarStatus(s.id, a.status)}
@@ -336,6 +522,12 @@ function LinhaSessao({
                 {a.label}
               </button>
             ))}
+            <MenuAcoesPaciente
+              sessaoId={s.id}
+              statusAtual={s.status}
+              emAvaliacao={emAvaliacao}
+              onMudarStatus={onMudarStatus}
+            />
           </div>
         )}
       </td>
@@ -353,7 +545,7 @@ function TabelaSessoes({
 }: {
   sessoes: Sessao[]
   terapeutasHoje: Terapeuta[]
-  onMudarStatus: (id: string, status: string) => void
+  onMudarStatus: (id: string, status: string, justificativa?: string) => void
   onMudarStatusTerapeuta?: (sessaoId: string, terapeutaId: string, status: string) => void
   onMarcarAusenciaProfissional?: (sessaoId: string, terapeutaId: string, motivo: string) => void
   onEditarPaciente?: (pacienteId: string) => void
@@ -449,8 +641,9 @@ export function RecepcaoView({
     const falta = sessoesOnly.filter(s => s.status === 'FALTA').length
     const faltaJustificada = sessoesOnly.filter(s => s.status === 'FALTA_JUSTIFICADA').length
     const atestado = sessoesOnly.filter(s => s.status === 'ATESTADO').length
-    const cancelado = sessoesOnly.filter(s => s.status === 'CANCELADO').length
-    return { total, presente, falta, faltaJustificada, atestado, cancelado }
+    const diaNaoFuncionou = sessoesOnly.filter(s => !!s.motivoDiaNaoFuncionou).length
+    const cancelado = sessoesOnly.filter(s => s.status === 'CANCELADO' && !s.motivoDiaNaoFuncionou).length
+    return { total, presente, falta, faltaJustificada, atestado, cancelado, diaNaoFuncionou }
   }, [sessoesOnly])
 
   const itensPorHorario = useMemo(() => {
@@ -809,7 +1002,7 @@ export function RecepcaoView({
         ) : modo === 'horario' ? (
           <>
             {/* Stats */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-5 gap-2">
               <div className="bg-white rounded-lg border p-2 text-center">
                 <div className="text-xl font-bold text-gray-900">{stats.total}</div>
                 <div className="text-[10px] text-gray-500">TOTAL</div>
@@ -825,6 +1018,10 @@ export function RecepcaoView({
               <div className="bg-gray-50 rounded-lg border border-gray-200 p-2 text-center">
                 <div className="text-xl font-bold text-gray-500">{stats.cancelado}</div>
                 <div className="text-[10px] text-gray-500">CANCELADOS</div>
+              </div>
+              <div className="bg-orange-50 rounded-lg border border-orange-200 p-2 text-center">
+                <div className="text-xl font-bold text-orange-700">{stats.diaNaoFuncionou}</div>
+                <div className="text-[10px] text-orange-600">DIA NÃO FUNC.</div>
               </div>
             </div>
 
@@ -954,8 +1151,8 @@ export function RecepcaoView({
                                   )}
                                 </td>
                                 <td className="px-4 py-3">
-                                  <div className="flex justify-center gap-1 flex-wrap">
-                                    {ACOES.map(a => (
+                                  <div className="flex justify-center gap-1 flex-wrap items-center">
+                                    {ACOES_PRINCIPAIS.map(a => (
                                       <button
                                         key={a.status}
                                         onClick={() => onMudarStatus(s.id, a.status)}
@@ -970,6 +1167,12 @@ export function RecepcaoView({
                                         {a.label}
                                       </button>
                                     ))}
+                                    <MenuAcoesPaciente
+                                      sessaoId={s.id}
+                                      statusAtual={s.status}
+                                      emAvaliacao={emAvaliacao}
+                                      onMudarStatus={onMudarStatus}
+                                    />
                                   </div>
                                 </td>
                               </tr>

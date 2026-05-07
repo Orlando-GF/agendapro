@@ -7,6 +7,7 @@ import { TerapeutaSchema } from '@/server/domains/terapeutas/schema'
 import { EspecialidadeSchema } from '@/server/domains/especialidades/schema'
 import { HorarioSchema } from '@/server/domains/horarios/schema'
 import { SessaoSchema } from '@/server/domains/sessoes/schema'
+import { extrairMotivoDiaNaoFuncionou } from '@/lib/status-helpers'
 
 // ========== PACIENTES ==========
 
@@ -116,6 +117,7 @@ export interface Sessao {
   hora_fim: string
   status: string
   observacoes?: string | null
+  motivoDiaNaoFuncionou?: string | null
   tipo?: string | null
   titulo?: string | null
   recorrente?: boolean | null
@@ -448,6 +450,7 @@ export async function listarSessoes(dataInicio: string, dataFim: string): Promis
     hora_fim: row.hora_fim,
     status: row.status,
     observacoes: row.observacoes,
+    motivoDiaNaoFuncionou: extrairMotivoDiaNaoFuncionou(row.observacoes),
     tipo: row.tipo,
     titulo: row.titulo,
     recorrente: row.recorrente,
@@ -480,6 +483,7 @@ export async function agendaSemana(dataInicio: string, dataFim: string): Promise
     hora_fim: row.hora_fim,
     status: row.status,
     observacoes: row.observacoes,
+    motivoDiaNaoFuncionou: extrairMotivoDiaNaoFuncionou(row.observacoes),
     tipo: row.tipo,
     titulo: row.titulo,
     recorrente: row.recorrente,
@@ -510,6 +514,7 @@ export async function recepcaoDia(dataParam: string): Promise<Sessao[]> {
     hora_fim: row.hora_fim,
     status: row.status,
     observacoes: row.observacoes,
+    motivoDiaNaoFuncionou: extrairMotivoDiaNaoFuncionou(row.observacoes),
     tipo: row.tipo,
     titulo: row.titulo,
     recorrente: row.recorrente,
@@ -559,12 +564,16 @@ const STATUS_SESSAO_VALIDOS = [
   'REPOSTO',
 ] as const
 
-export async function atualizarStatusSessao(id: string, status: string): Promise<void> {
+export async function atualizarStatusSessao(id: string, status: string, justificativa?: string): Promise<void> {
   if (!STATUS_SESSAO_VALIDOS.includes(status as (typeof STATUS_SESSAO_VALIDOS)[number])) {
     throw new Error(`STATUS INVALIDO: ${status}`)
   }
   const supabase = await createClient()
-  const { error } = await supabase.from('sessoes').update({ status }).eq('id', id)
+  const update: Record<string, unknown> = { status }
+  if (justificativa?.trim()) {
+    update.observacoes = `FALTA JUSTIFICADA: ${justificativa.trim()}`
+  }
+  const { error } = await supabase.from('sessoes').update(update).eq('id', id)
   if (error) throw new Error(error.message)
 }
 
@@ -641,6 +650,7 @@ export interface SessaoHistorico {
   paciente_nome?: string | null
   paciente_em_avaliacao?: boolean | null
   isDiaNaoFuncionou?: boolean
+  motivoDiaNaoFuncionou?: string | null
   terapeutas: { nome: string; status: string; observacoes?: string | null; ativo?: boolean | null }[]
 }
 
@@ -670,7 +680,7 @@ export async function listarHistoricoPaciente(
 
   const { data: rows, error } = await supabase
     .from('sessoes')
-    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome, ativo), status, observacoes)')
+    .select('id, data, hora_inicio, hora_fim, status, tipo, titulo, observacoes, patients(nome, em_avaliacao), sessao_terapeutas(terapeutas(nome, ativo), status, observacoes)')
     .eq('paciente_id', pacienteId)
     .gte('data', dataInicio)
     .lte('data', dataFim)
@@ -692,6 +702,7 @@ export async function listarHistoricoPaciente(
       paciente_nome: paciente?.nome || null,
       paciente_em_avaliacao: paciente?.em_avaliacao || null,
       isDiaNaoFuncionou: row.status === 'CANCELADO' && typeof row.observacoes === 'string' && row.observacoes.startsWith('DIA NAO FUNCIONOU'),
+      motivoDiaNaoFuncionou: extrairMotivoDiaNaoFuncionou(row.observacoes),
       terapeutas: (row.sessao_terapeutas || [])
         .filter((st: any) => st.terapeutas?.nome)
         .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes, ativo: st.terapeutas?.ativo ?? true })),
@@ -748,6 +759,7 @@ export async function listarHistoricoTerapeuta(
       paciente_nome: paciente?.nome || null,
       paciente_em_avaliacao: paciente?.em_avaliacao || null,
       isDiaNaoFuncionou: row.status === 'CANCELADO' && typeof row.observacoes === 'string' && row.observacoes.startsWith('DIA NAO FUNCIONOU'),
+      motivoDiaNaoFuncionou: extrairMotivoDiaNaoFuncionou(row.observacoes),
       terapeutas: (row.sessao_terapeutas || [])
         .filter((st: any) => st.terapeutas?.nome)
         .map((st: any) => ({ nome: st.terapeutas.nome, status: st.status || 'AGENDADO', observacoes: st.observacoes, ativo: st.terapeutas?.ativo ?? true })),
@@ -814,7 +826,7 @@ export async function listarEstatisticasGerais(
   if (error) throw new Error(error.message)
 
   const sessoes = rows || []
-  const stats = calcularStats(sessoes.map((r: any) => ({ status: r.status, isDiaNaoFuncionou: r.status === 'CANCELADO' && typeof r.observacoes === 'string' && r.observacoes.startsWith('DIA NAO FUNCIONOU') })))
+  const stats = calcularStats(sessoes.map((r: any) => ({ status: r.status, isDiaNaoFuncionou: r.status === 'CANCELADO' && typeof r.observacoes === 'string' && r.observacoes.startsWith('DIA NAO FUNCIONOU'), motivoDiaNaoFuncionou: extrairMotivoDiaNaoFuncionou(r.observacoes) })))
 
   // Agrupa por paciente (exclui dias que nao funcionaram)
   const map = new Map<string, { nome: string; total: number; presente: number }>()

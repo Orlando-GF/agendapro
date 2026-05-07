@@ -103,9 +103,9 @@ function TabelaHistorico({ sessoes }: { sessoes: SessaoHistorico[] }) {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  {s.isDiaNaoFuncionou ? (
+                  {s.motivoDiaNaoFuncionou ? (
                     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${STATUS_COR_HELPER.FERIADO}`}>
-                      FERIADO
+                      {s.motivoDiaNaoFuncionou}
                     </span>
                   ) : s.paciente_em_avaliacao ? (
                     <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
@@ -384,7 +384,8 @@ export function RelatoriosView({ pacientes, terapeutas, onBuscarPaciente, onBusc
                     { key: 'taxa' as const, header: 'TAXA %' },
                   ], `RELATORIO_GERAL_${dataInicio}_${dataFim}`)
                 } else {
-                  exportarExcel(sessoes, [
+                  const dadosExport = sessoes.map(s => ({ ...s, status: s.motivoDiaNaoFuncionou || s.status }))
+                  exportarExcel(dadosExport, [
                     { key: 'data' as const, header: 'DATA' },
                     { key: 'hora_inicio' as const, header: 'INÍCIO' },
                     { key: 'hora_fim' as const, header: 'FIM' },

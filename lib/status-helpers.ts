@@ -30,6 +30,7 @@ export const STATUS_CONFIG: Record<string, { label: string; cor: string; hover: 
   ALTA: { label: 'ALTA', cor: 'bg-blue-50 text-blue-700 border-blue-200', hover: 'hover:bg-blue-100' },
   DESISTIU: { label: 'DESISTIU', cor: 'bg-red-50 text-red-700 border-red-200', hover: 'hover:bg-red-100' },
   MUDANCA: { label: 'MUDANÇA', cor: 'bg-orange-50 text-orange-700 border-orange-200', hover: 'hover:bg-orange-100' },
+  FERIADO: { label: 'FERIADO', cor: 'bg-orange-50 text-orange-600 border-orange-200', hover: 'hover:bg-orange-100' },
 }
 
 export const STATUS_TERAPETA_CONFIG: Record<string, { label: string; cor: string }> = {
@@ -49,4 +50,17 @@ export function extrairMotivoAusencia(observacoes?: string | null): string | nul
   if (idx === -1) return null
   const motivo = observacoes.slice(idx + 1).trim()
   return motivo ? motivo.toUpperCase() : null
+}
+
+/**
+ * Extrai o motivo do "Dia Não Funcionou" do texto de observações.
+ * Formato esperado: "DIA NAO FUNCIONOU: Feriado"
+ */
+export function extrairMotivoDiaNaoFuncionou(observacoes?: string | null): string | null {
+  if (!observacoes) return null
+  const prefixo = 'DIA NAO FUNCIONOU:'
+  if (observacoes.startsWith(prefixo)) {
+    return observacoes.slice(prefixo.length).trim().toUpperCase()
+  }
+  return null
 }
