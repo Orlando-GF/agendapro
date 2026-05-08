@@ -46,6 +46,7 @@ interface Props {
   onMudarSemana: (d: Date) => void
   onNovaSessao: (data: string, horaInicio: string, horaFim: string) => void
   onEditarSessao: (s: Sessao) => void
+  onExcluirSessao: (id: string) => void
   onBloquear: (data: string, horaInicio: string, horaFim: string) => void
   onDesbloquear: (id: string) => void
   onMoverSessao: (
@@ -139,6 +140,7 @@ export function CalendarioSemanal({
   onMudarSemana,
   onNovaSessao,
   onEditarSessao,
+  onExcluirSessao,
   onBloquear,
   onDesbloquear,
   onMoverSessao,
@@ -600,6 +602,7 @@ export function CalendarioSemanal({
           horaFim={celulaSelecionada.horaFim}
           sessoes={celulaSelecionada.sessoes}
           onEditar={s => { setCelulaSelecionada(null); onEditarSessao(s) }}
+          onExcluir={id => { setCelulaSelecionada(null); onExcluirSessao(id) }}
           onNova={(d, hi, hf) => { setCelulaSelecionada(null); onNovaSessao(d, hi, hf) }}
           onFechar={() => setCelulaSelecionada(null)}
         />

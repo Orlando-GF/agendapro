@@ -11,7 +11,7 @@ export const PatientSchema = z.object({
   em_avaliacao: z.boolean().optional().default(false),
   whatsapp_adicionado: z.boolean().optional().default(false),
   judicial: z.boolean().optional().default(false),
-  laudo: z.boolean().optional().default(false),
+  laudo: z.boolean().optional().nullable(),
   observacoes: z.string().optional().nullable(),
   status_tratamento: z.enum(['EM_TRATAMENTO', 'ALTA', 'DESISTIU', 'MUDANCA']).optional().default('EM_TRATAMENTO'),
   motivo_saida: z.string().optional().nullable(),

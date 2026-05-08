@@ -7,6 +7,8 @@ import { TerapeutaSchema } from '@/server/domains/terapeutas/schema'
 import { EspecialidadeSchema } from '@/server/domains/especialidades/schema'
 import { HorarioSchema } from '@/server/domains/horarios/schema'
 import { SessaoSchema } from '@/server/domains/sessoes/schema'
+import { GrupoSchema, GrupoParticipanteSchema, GrupoPresencaSchema, type GrupoInput, type GrupoParticipanteInput, type GrupoPresencaInput } from '@/server/domains/grupos/schema'
+import { PlantaoSchema, PlantaoParticipanteSchema, type PlantaoInput, type PlantaoParticipanteInput } from '@/server/domains/plantoes/schema'
 import { extrairMotivoDiaNaoFuncionou } from '@/lib/status-helpers'
 
 // ========== PACIENTES ==========
@@ -212,7 +214,7 @@ export async function salvarPaciente(dados: PatientFormData): Promise<Patient> {
     em_avaliacao: dados.em_avaliacao ?? false,
     whatsapp_adicionado: dados.whatsapp_adicionado ?? false,
     judicial: dados.judicial ?? false,
-    laudo: dados.laudo ?? false,
+    laudo: dados.laudo,
     observacoes: toUpper(dados.observacoes),
     status_tratamento: dados.status_tratamento ?? 'EM_TRATAMENTO',
     motivo_saida: toUpper(dados.motivo_saida),
@@ -559,9 +561,17 @@ const STATUS_SESSAO_VALIDOS = [
   'ATESTADO',
   'ATESTADO_PROFISSIONAL',
   'FALTA_PROFISSIONAL',
-  'AUSENCIA_PROFISSIONAL',
   'CANCELADO',
   'REPOSTO',
+] as const
+
+const STATUS_TERAPEUTA_VALIDOS = [
+  'AGENDADO',
+  'CONFIRMADO',
+  'PRESENTE',
+  'FALTA_PROFISSIONAL',
+  'ATESTADO_PROFISSIONAL',
+  'CANCELADO',
 ] as const
 
 export async function atualizarStatusSessao(id: string, status: string, justificativa?: string): Promise<void> {
@@ -662,7 +672,6 @@ export interface StatsResumo {
   atestado: number
   atestadoProfissional: number
   faltaProfissional: number
-  ausenciaProfissional: number
   cancelado: number
   taxaComparecimento: number
 }
@@ -872,11 +881,10 @@ function calcularStats(sessoes: { status: string; isDiaNaoFuncionou?: boolean }[
   const atestado = validas.filter(s => s.status === 'ATESTADO').length
   const atestadoProfissional = validas.filter(s => s.status === 'ATESTADO_PROFISSIONAL').length
   const faltaProfissional = validas.filter(s => s.status === 'FALTA_PROFISSIONAL').length
-  const ausenciaProfissional = validas.filter(s => s.status === 'AUSENCIA_PROFISSIONAL').length
   const cancelado = validas.filter(s => s.status === 'CANCELADO').length
   const taxaComparecimento = total > 0 ? Math.round((presente / total) * 100) : 0
 
-  return { total, presente, falta, faltaJustificada, atestado, atestadoProfissional, faltaProfissional, ausenciaProfissional, cancelado, taxaComparecimento }
+  return { total, presente, falta, faltaJustificada, atestado, atestadoProfissional, faltaProfissional, cancelado, taxaComparecimento }
 }
 
 // ========== BLOQUEIOS ==========
@@ -1023,16 +1031,41 @@ export async function excluirAusencia(id: string): Promise<void> {
 export async function atualizarStatusTerapeutaSessao(sessaoId: string, terapeutaId: string, status: string): Promise<void> {
   if (!isValidUUID(sessaoId)) throw new Error('ID DE SESSAO INVALIDO')
   if (!isValidUUID(terapeutaId)) throw new Error('ID DE TERAPEUTA INVALIDO')
-  if (!STATUS_SESSAO_VALIDOS.includes(status as (typeof STATUS_SESSAO_VALIDOS)[number])) {
+  if (!STATUS_TERAPEUTA_VALIDOS.includes(status as (typeof STATUS_TERAPEUTA_VALIDOS)[number])) {
     throw new Error(`STATUS INVALIDO: ${status}`)
   }
   const supabase = await createClient()
   const { error } = await supabase
     .from('sessao_terapeutas')
-    .update({ status })
+    .update({ status, observacoes: null })
     .eq('sessao_id', sessaoId)
     .eq('terapeuta_id', terapeutaId)
   if (error) throw new Error(error.message)
+
+  // Se a sessao estava como FALTA_PROFISSIONAL e um terapeuta voltou a AGENDADO/PRESENTE, reverte a sessao
+  if (status === 'AGENDADO' || status === 'PRESENTE') {
+    const { data: sessao } = await supabase.from('sessoes').select('status').eq('id', sessaoId).single()
+    if (sessao?.status === 'FALTA_PROFISSIONAL') {
+      const { data: todosTerapeutas } = await supabase
+        .from('sessao_terapeutas')
+        .select('status')
+        .eq('sessao_id', sessaoId)
+      if (todosTerapeutas && todosTerapeutas.some(t => t.status === 'AGENDADO' || t.status === 'PRESENTE')) {
+        await supabase.from('sessoes').update({ status: 'AGENDADO' }).eq('id', sessaoId)
+      }
+    }
+  }
+
+  // Se todos os terapeutas da sessao estao ausentes, atualiza sessoes.status para FALTA_PROFISSIONAL
+  if (status === 'FALTA_PROFISSIONAL' || status === 'ATESTADO_PROFISSIONAL') {
+    const { data: todosTerapeutas } = await supabase
+      .from('sessao_terapeutas')
+      .select('status')
+      .eq('sessao_id', sessaoId)
+    if (todosTerapeutas && todosTerapeutas.length > 0 && todosTerapeutas.every(t => t.status === 'FALTA_PROFISSIONAL' || t.status === 'ATESTADO_PROFISSIONAL')) {
+      await supabase.from('sessoes').update({ status: 'FALTA_PROFISSIONAL' }).eq('id', sessaoId)
+    }
+  }
 }
 
 export async function marcarAusenciaProfissional(sessaoId: string, terapeutaId: string, motivo: string): Promise<void> {
@@ -1201,4 +1234,294 @@ export async function cancelarSessoesFuturasDoPaciente(pacienteId: string): Prom
   }
 
   return sessoes.length
+}
+
+// ========== GRUPOS ==========
+
+export interface Grupo {
+  id: string
+  nome: string
+  dia_semana: number
+  hora_inicio: string
+  hora_fim: string
+  ativo?: boolean | null
+  observacoes?: string | null
+  terapeutas?: { id: string; nome: string }[]
+  total_participantes?: number
+}
+
+export interface GrupoParticipante {
+  id: string
+  grupo_id: string
+  nome: string
+  telefone?: string | null
+  prontuario_referencia?: string | null
+  ativo?: boolean | null
+}
+
+export interface GrupoPresenca {
+  id: string
+  grupo_id: string
+  data: string
+  participante_id?: string | null
+  nome: string
+  telefone?: string | null
+  prontuario_referencia?: string | null
+  presente: boolean
+  ordem_chegada?: number | null
+  observacoes?: string | null
+}
+
+export async function listarGrupos(): Promise<Grupo[]> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('listar_grupos_completos')
+  if (error) throw new Error(error.message)
+  return (data as Grupo[]) || []
+}
+
+export async function salvarGrupo(dados: GrupoInput): Promise<Grupo> {
+  const parsed = GrupoSchema.parse(dados)
+  const supabase = await createClient()
+
+  const { terapeutas_ids, ...grupoData } = parsed
+
+  if (grupoData.id) {
+    const { id, ...updateData } = grupoData
+    const { data, error } = await supabase.from('grupos').update(updateData).eq('id', id).select().single()
+    if (error) throw new Error(error.message)
+
+    // Atualiza terapeutas
+    await supabase.from('grupo_terapeutas').delete().eq('grupo_id', id)
+    if (terapeutas_ids.length > 0) {
+      await supabase.from('grupo_terapeutas').insert(
+        terapeutas_ids.map(tid => ({ grupo_id: id, terapeuta_id: tid }))
+      )
+    }
+    return data as Grupo
+  } else {
+    const { data, error } = await supabase.from('grupos').insert(grupoData).select().single()
+    if (error) throw new Error(error.message)
+
+    if (terapeutas_ids.length > 0) {
+      await supabase.from('grupo_terapeutas').insert(
+        terapeutas_ids.map(tid => ({ grupo_id: data.id, terapeuta_id: tid }))
+      )
+    }
+    return data as Grupo
+  }
+}
+
+export async function excluirGrupo(id: string): Promise<void> {
+  if (!isValidUUID(id)) throw new Error('ID DE GRUPO INVALIDO')
+  const supabase = await createClient()
+  const { error } = await supabase.from('grupos').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function listarParticipantesGrupo(grupoId: string): Promise<GrupoParticipante[]> {
+  if (!isValidUUID(grupoId)) throw new Error('ID DE GRUPO INVALIDO')
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('grupo_participantes')
+    .select('*')
+    .eq('grupo_id', grupoId)
+    .eq('ativo', true)
+    .order('nome')
+  if (error) throw new Error(error.message)
+  return (data as GrupoParticipante[]) || []
+}
+
+export async function salvarParticipanteGrupo(dados: GrupoParticipanteInput): Promise<GrupoParticipante> {
+  const parsed = GrupoParticipanteSchema.parse(dados)
+  const supabase = await createClient()
+  if (parsed.id) {
+    const { id, ...updateData } = parsed
+    const { data, error } = await supabase.from('grupo_participantes').update(updateData).eq('id', id).select().single()
+    if (error) throw new Error(error.message)
+    return data as GrupoParticipante
+  } else {
+    const { data, error } = await supabase.from('grupo_participantes').insert(parsed).select().single()
+    if (error) throw new Error(error.message)
+    return data as GrupoParticipante
+  }
+}
+
+export async function excluirParticipanteGrupo(id: string): Promise<void> {
+  if (!isValidUUID(id)) throw new Error('ID DE PARTICIPANTE INVALIDO')
+  const supabase = await createClient()
+  const { error } = await supabase.from('grupo_participantes').update({ ativo: false }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function listarPresencasGrupo(grupoId: string, data: string): Promise<GrupoPresenca[]> {
+  if (!isValidUUID(grupoId)) throw new Error('ID DE GRUPO INVALIDO')
+  if (!isValidISODate(data)) throw new Error('DATA INVALIDA')
+  const supabase = await createClient()
+  const { data: rows, error } = await supabase.rpc('listar_presencas_grupo', {
+    p_grupo_id: grupoId,
+    p_data: data,
+  })
+  if (error) throw new Error(error.message)
+  return (rows as GrupoPresenca[]) || []
+}
+
+export async function salvarPresencaGrupo(dados: GrupoPresencaInput): Promise<GrupoPresenca> {
+  const parsed = GrupoPresencaSchema.parse(dados)
+  const supabase = await createClient()
+  if (parsed.id) {
+    const { id, ...updateData } = parsed
+    const { data, error } = await supabase.from('grupo_presencas').update(updateData).eq('id', id).select().single()
+    if (error) throw new Error(error.message)
+    return data as GrupoPresenca
+  } else {
+    const { data, error } = await supabase.from('grupo_presencas').insert(parsed).select().single()
+    if (error) throw new Error(error.message)
+    return data as GrupoPresenca
+  }
+}
+
+export async function excluirPresencaGrupo(id: string): Promise<void> {
+  if (!isValidUUID(id)) throw new Error('ID DE PRESENCA INVALIDO')
+  const supabase = await createClient()
+  const { error } = await supabase.from('grupo_presencas').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function gerarPresencasAutomaticas(grupoId: string, data: string): Promise<number> {
+  if (!isValidUUID(grupoId)) throw new Error('ID DE GRUPO INVALIDO')
+  if (!isValidISODate(data)) throw new Error('DATA INVALIDA')
+  const supabase = await createClient()
+  const { data: count, error } = await supabase.rpc('gerar_presencas_grupo', {
+    p_grupo_id: grupoId,
+    p_data: data,
+  })
+  if (error) throw new Error(error.message)
+  return (count as number) || 0
+}
+
+// ========== PLANTÕES ==========
+
+export interface Plantao {
+  id: string
+  data: string
+  hora_inicio: string
+  hora_fim: string
+  titulo?: string | null
+  observacoes?: string | null
+  terapeutas?: { id: string; nome: string }[]
+  total_participantes?: number
+}
+
+export interface PlantaoParticipante {
+  id: string
+  plantao_id: string
+  nome: string
+  telefone?: string | null
+  prontuario_referencia?: string | null
+  ordem_chegada: number
+  presente: boolean
+  observacoes?: string | null
+}
+
+export async function listarPlantoes(dataInicio?: string, dataFim?: string): Promise<Plantao[]> {
+  const supabase = await createClient()
+  let query = supabase.from('plantoes').select('*').order('data', { ascending: false }).order('hora_inicio')
+  if (dataInicio && dataFim) {
+    query = query.gte('data', dataInicio).lte('data', dataFim)
+  }
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+
+  const plantoes = (data as Plantao[]) || []
+  // Carrega terapeutas e contagem
+  for (const p of plantoes) {
+    const { data: tRows } = await supabase
+      .from('plantao_terapeutas')
+      .select('terapeutas(id, nome)')
+      .eq('plantao_id', p.id)
+    p.terapeutas = (tRows || []).map((r: any) => r.terapeutas).filter(Boolean)
+    const { count } = await supabase.from('plantao_participantes').select('*', { count: 'exact', head: true }).eq('plantao_id', p.id)
+    p.total_participantes = count || 0
+  }
+  return plantoes
+}
+
+export async function listarPlantoesDia(data: string): Promise<Plantao[]> {
+  if (!isValidISODate(data)) throw new Error('DATA INVALIDA')
+  const supabase = await createClient()
+  const { data: rows, error } = await supabase.rpc('listar_plantoes_dia', { p_data: data })
+  if (error) throw new Error(error.message)
+  return (rows as Plantao[]) || []
+}
+
+export async function salvarPlantao(dados: PlantaoInput): Promise<Plantao> {
+  const parsed = PlantaoSchema.parse(dados)
+  const supabase = await createClient()
+  const { terapeutas_ids, ...plantaoData } = parsed
+
+  if (plantaoData.id) {
+    const { id, ...updateData } = plantaoData
+    const { data, error } = await supabase.from('plantoes').update(updateData).eq('id', id).select().single()
+    if (error) throw new Error(error.message)
+
+    await supabase.from('plantao_terapeutas').delete().eq('plantao_id', id)
+    if (terapeutas_ids.length > 0) {
+      await supabase.from('plantao_terapeutas').insert(
+        terapeutas_ids.map(tid => ({ plantao_id: id, terapeuta_id: tid }))
+      )
+    }
+    return data as Plantao
+  } else {
+    const { data, error } = await supabase.from('plantoes').insert(plantaoData).select().single()
+    if (error) throw new Error(error.message)
+
+    if (terapeutas_ids.length > 0) {
+      await supabase.from('plantao_terapeutas').insert(
+        terapeutas_ids.map(tid => ({ plantao_id: data.id, terapeuta_id: tid }))
+      )
+    }
+    return data as Plantao
+  }
+}
+
+export async function excluirPlantao(id: string): Promise<void> {
+  if (!isValidUUID(id)) throw new Error('ID DE PLANTAO INVALIDO')
+  const supabase = await createClient()
+  const { error } = await supabase.from('plantoes').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function listarParticipantesPlantao(plantaoId: string): Promise<PlantaoParticipante[]> {
+  if (!isValidUUID(plantaoId)) throw new Error('ID DE PLANTAO INVALIDO')
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('plantao_participantes')
+    .select('*')
+    .eq('plantao_id', plantaoId)
+    .order('ordem_chegada')
+    .order('created_at')
+  if (error) throw new Error(error.message)
+  return (data as PlantaoParticipante[]) || []
+}
+
+export async function salvarParticipantePlantao(dados: PlantaoParticipanteInput): Promise<PlantaoParticipante> {
+  const parsed = PlantaoParticipanteSchema.parse(dados)
+  const supabase = await createClient()
+  if (parsed.id) {
+    const { id, ...updateData } = parsed
+    const { data, error } = await supabase.from('plantao_participantes').update(updateData).eq('id', id).select().single()
+    if (error) throw new Error(error.message)
+    return data as PlantaoParticipante
+  } else {
+    const { data, error } = await supabase.from('plantao_participantes').insert(parsed).select().single()
+    if (error) throw new Error(error.message)
+    return data as PlantaoParticipante
+  }
+}
+
+export async function excluirParticipantePlantao(id: string): Promise<void> {
+  if (!isValidUUID(id)) throw new Error('ID DE PARTICIPANTE INVALIDO')
+  const supabase = await createClient()
+  const { error } = await supabase.from('plantao_participantes').delete().eq('id', id)
+  if (error) throw new Error(error.message)
 }

@@ -11,6 +11,8 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  BookOpen,
+  HeartPulse,
 } from 'lucide-react'
 
 interface Props {
@@ -25,6 +27,8 @@ const items = [
   { id: 'terapeutas', label: 'Terapeutas', icon: Stethoscope },
   { id: 'especialidades', label: 'Especialidades', icon: Layers },
   { id: 'horarios', label: 'Horários', icon: Clock },
+  { id: 'grupos', label: 'Grupos', icon: BookOpen },
+  { id: 'plantoes', label: 'Plantões', icon: HeartPulse },
   { id: 'relatorios', label: 'Relatórios', icon: BarChart3 },
 ]
 

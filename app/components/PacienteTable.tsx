@@ -99,10 +99,12 @@ export function PacienteTable({ pacientes, page, hasMore, total, loading, onEdit
                   )}
                 </td>
                 <td className="px-4 py-3 text-center">
-                  {p.laudo ? (
+                  {p.laudo === true ? (
                     <span className="inline-flex w-6 h-6 items-center justify-center rounded-full bg-purple-100 text-purple-700 text-xs font-bold">L</span>
+                  ) : p.laudo === false ? (
+                    <span className="inline-flex w-6 h-6 items-center justify-center rounded-full bg-gray-100 text-gray-500 text-xs font-bold">✗</span>
                   ) : (
-                    <span className="text-gray-300">-</span>
+                    <span className="inline-flex w-6 h-6 items-center justify-center rounded-full bg-yellow-100 text-yellow-700 text-xs font-bold">?</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-center">

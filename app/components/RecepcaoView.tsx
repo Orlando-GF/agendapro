@@ -5,7 +5,7 @@ import { Sessao, Terapeuta, Ausencia, Horario, Bloqueio } from '../actions'
 import { formatDateBR, formatDateISO, formatarAgendaWhatsApp } from '@/lib/date-helpers'
 import { exportarExcel, exportarPDF } from '@/lib/export-utils'
 import { useToast } from '../hooks/useToast'
-import { STATUS_CONFIG, STATUS_TERAPETA_CONFIG, STATUS_COR, extrairMotivoAusencia } from '@/lib/status-helpers'
+import { STATUS_CONFIG, STATUS_TERAPEUTA_CONFIG, STATUS_COR, extrairMotivoAusencia } from '@/lib/status-helpers'
 
 interface Props {
   sessoes: Sessao[]
@@ -225,7 +225,8 @@ function MenuTerapeutaStatus({
 }) {
   const [aberto, setAberto] = useState(false)
   const [modalMotivo, setModalMotivo] = useState(false)
-  const [motivo, setMotivo] = useState('')
+  const [motivoSelecionado, setMotivoSelecionado] = useState('')
+  const [motivoOutro, setMotivoOutro] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -268,15 +269,18 @@ function MenuTerapeutaStatus({
     setAberto(!aberto)
   }
 
+  const motivoFinal = motivoSelecionado === 'Outro' ? motivoOutro.trim() : motivoSelecionado
+
   const handleConfirmarAusencia = async () => {
-    if (onMarcarAusencia && motivo.trim() && !salvando) {
+    if (onMarcarAusencia && motivoFinal && !salvando) {
       setSalvando(true)
       try {
-        await onMarcarAusencia(motivo.trim())
+        await onMarcarAusencia(motivoFinal)
       } finally {
         setSalvando(false)
         setModalMotivo(false)
-        setMotivo('')
+        setMotivoSelecionado('')
+        setMotivoOutro('')
         setAberto(false)
       }
     }
@@ -303,7 +307,50 @@ function MenuTerapeutaStatus({
             {terapeuta.nome}
           </div>
 
-          {/* Ação: Registrar Ausência (abre modal) */}
+          {/* Ações de status do profissional */}
+          {onMudarStatus && (
+            <>
+              <button
+                onClick={() => {
+                  onMudarStatus(sessaoId, terapeuta.id, 'FALTA_PROFISSIONAL')
+                  setAberto(false)
+                }}
+                disabled={statusAtual === 'FALTA_PROFISSIONAL'}
+                className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors text-pink-700 hover:bg-pink-50 ${
+                  statusAtual === 'FALTA_PROFISSIONAL' ? 'opacity-40 cursor-default' : ''
+                }`}
+              >
+                Falta do Profissional
+                {statusAtual === 'FALTA_PROFISSIONAL' && ' ✓'}
+              </button>
+              <button
+                onClick={() => {
+                  onMudarStatus(sessaoId, terapeuta.id, 'ATESTADO_PROFISSIONAL')
+                  setAberto(false)
+                }}
+                disabled={statusAtual === 'ATESTADO_PROFISSIONAL'}
+                className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors text-indigo-700 hover:bg-indigo-50 ${
+                  statusAtual === 'ATESTADO_PROFISSIONAL' ? 'opacity-40 cursor-default' : ''
+                }`}
+              >
+                Atestado do Profissional
+                {statusAtual === 'ATESTADO_PROFISSIONAL' && ' ✓'}
+              </button>
+              <button
+                onClick={() => {
+                  onMudarStatus(sessaoId, terapeuta.id, 'AGENDADO')
+                  setAberto(false)
+                }}
+                disabled={statusAtual === 'AGENDADO'}
+                className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors text-gray-700 hover:bg-gray-50 ${
+                  statusAtual === 'AGENDADO' ? 'opacity-40 cursor-default' : ''
+                }`}
+              >
+                Resetar para Agendado
+                {statusAtual === 'AGENDADO' && ' ✓'}
+              </button>
+            </>
+          )}
           {onMarcarAusencia && (
             <button
               onClick={() => {
@@ -311,24 +358,7 @@ function MenuTerapeutaStatus({
               }}
               className="w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors text-teal-700 hover:bg-teal-50"
             >
-              {temAusencia ? 'Alterar Ausência' : 'Registrar Ausência'}
-            </button>
-          )}
-
-          {/* Ação: Resetar para Agendado */}
-          {onMudarStatus && (
-            <button
-              onClick={() => {
-                onMudarStatus(sessaoId, terapeuta.id, 'AGENDADO')
-                setAberto(false)
-              }}
-              disabled={statusAtual === 'AGENDADO'}
-              className={`w-full text-left px-3 py-2 text-xs font-medium normal-case transition-colors text-gray-700 hover:bg-gray-50 ${
-                statusAtual === 'AGENDADO' ? 'opacity-40 cursor-default' : ''
-              }`}
-            >
-              Resetar para Agendado
-              {statusAtual === 'AGENDADO' && ' ✓'}
+              Registrar Ausência com Motivo
             </button>
           )}
         </div>
@@ -349,8 +379,8 @@ function MenuTerapeutaStatus({
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">MOTIVO</label>
               <select
-                value={motivo}
-                onChange={e => setMotivo(e.target.value)}
+                value={motivoSelecionado}
+                onChange={e => setMotivoSelecionado(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
                 <option value="">Selecione...</option>
@@ -361,13 +391,13 @@ function MenuTerapeutaStatus({
                 <option value="Outro">Outro</option>
               </select>
             </div>
-            {motivo === 'Outro' && (
+            {motivoSelecionado === 'Outro' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ESPECIFIQUE</label>
                 <input
                   type="text"
-                  value={motivo === 'Outro' ? '' : motivo}
-                  onChange={e => setMotivo(e.target.value)}
+                  value={motivoOutro}
+                  onChange={e => setMotivoOutro(e.target.value)}
                   placeholder="Ex: compromisso pessoal..."
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
@@ -375,14 +405,14 @@ function MenuTerapeutaStatus({
             )}
             <div className="flex justify-end gap-3 pt-2">
               <button
-                onClick={() => { setModalMotivo(false); setMotivo('') }}
+                onClick={() => { setModalMotivo(false); setMotivoSelecionado(''); setMotivoOutro('') }}
                 className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium normal-case"
               >
                 CANCELAR
               </button>
               <button
                 onClick={handleConfirmarAusencia}
-                disabled={!motivo.trim() || salvando}
+                disabled={!motivoFinal || salvando}
                 className="px-4 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 font-medium disabled:opacity-50 normal-case"
               >
                 {salvando ? 'SALVANDO...' : 'CONFIRMAR'}
@@ -469,7 +499,7 @@ function LinhaSessao({
         ) : (
           <div className="flex flex-col gap-0.5">
             {(s.terapeutas || []).map(t => {
-              const stCfg = STATUS_TERAPETA_CONFIG[t.status || 'AGENDADO']
+              const stCfg = STATUS_TERAPEUTA_CONFIG[t.status || 'AGENDADO']
               const temExcecao = t.status && t.status !== 'AGENDADO' && t.status !== 'PRESENTE'
               const motivo = extrairMotivoAusencia(t.observacoes)
               return (
@@ -636,6 +666,9 @@ export function RecepcaoView({
   // UI Otimista: status temporários que mudam instantaneamente na tela
   const [statusOtimistas, setStatusOtimistas] = useState<Map<string, string>>(new Map())
 
+  // UI Otimista para status individual de terapeutas
+  const [statusTerapeutasOtimistas, setStatusTerapeutasOtimistas] = useState<Map<string, string>>(new Map())
+
   // Sincroniza: remove do Map os status que já foram confirmados pelo servidor
   useEffect(() => {
     setStatusOtimistas(prev => {
@@ -648,6 +681,18 @@ export function RecepcaoView({
       }
       return next
     })
+    setStatusTerapeutasOtimistas(prev => {
+      const next = new Map(prev)
+      for (const [key, status] of next) {
+        const [sessaoId, terapeutaId] = key.split('-')
+        const real = sessoes.find(s => s.id === sessaoId)
+        const realTerapeuta = real?.terapeutas?.find((t: any) => t.id === terapeutaId)
+        if (realTerapeuta && realTerapeuta.status === status) {
+          next.delete(key)
+        }
+      }
+      return next
+    })
   }, [sessoes])
 
   const handleMudarStatusLocal = (id: string, status: string, justificativa?: string) => {
@@ -655,17 +700,35 @@ export function RecepcaoView({
     onMudarStatus(id, status, justificativa)
   }
 
+  const handleMudarStatusTerapeutaLocal = (sessaoId: string, terapeutaId: string, status: string) => {
+    setStatusTerapeutasOtimistas(prev => new Map(prev).set(`${sessaoId}-${terapeutaId}`, status))
+    if (onMudarStatusTerapeuta) {
+      onMudarStatusTerapeuta(sessaoId, terapeutaId, status)
+    }
+  }
+
   // Sessões visíveis com status otimistas aplicados (usado na renderização)
   const sessoesVisiveis = useMemo(() => {
-    if (statusOtimistas.size === 0) return sessoes
+    if (statusOtimistas.size === 0 && statusTerapeutasOtimistas.size === 0) return sessoes
     return sessoes.map(s => {
+      let sessaoAtualizada = s
       const statusOtimista = statusOtimistas.get(s.id)
       if (statusOtimista && statusOtimista !== s.status) {
-        return { ...s, status: statusOtimista }
+        sessaoAtualizada = { ...sessaoAtualizada, status: statusOtimista }
       }
-      return s
+      if (statusTerapeutasOtimistas.size > 0 && s.terapeutas) {
+        const terapeutasAtualizados = s.terapeutas.map((t: any) => {
+          const statusOpt = statusTerapeutasOtimistas.get(`${s.id}-${t.id}`)
+          if (statusOpt && statusOpt !== t.status) {
+            return { ...t, status: statusOpt }
+          }
+          return t
+        })
+        sessaoAtualizada = { ...sessaoAtualizada, terapeutas: terapeutasAtualizados }
+      }
+      return sessaoAtualizada
     })
-  }, [sessoes, statusOtimistas])
+  }, [sessoes, statusOtimistas, statusTerapeutasOtimistas])
 
   const sessoesOnly = useMemo(() => sessoesVisiveis.filter(s => s.tipo === 'SESSAO'), [sessoesVisiveis])
 
@@ -675,9 +738,11 @@ export function RecepcaoView({
     const falta = sessoesOnly.filter(s => s.status === 'FALTA').length
     const faltaJustificada = sessoesOnly.filter(s => s.status === 'FALTA_JUSTIFICADA').length
     const atestado = sessoesOnly.filter(s => s.status === 'ATESTADO').length
+    const faltaProfissional = sessoesOnly.filter(s => s.status === 'FALTA_PROFISSIONAL').length
+    const atestadoProfissional = sessoesOnly.filter(s => s.status === 'ATESTADO_PROFISSIONAL').length
     const diaNaoFuncionou = sessoesOnly.filter(s => !!s.motivoDiaNaoFuncionou).length
     const cancelado = sessoesOnly.filter(s => s.status === 'CANCELADO' && !s.motivoDiaNaoFuncionou).length
-    return { total, presente, falta, faltaJustificada, atestado, cancelado, diaNaoFuncionou }
+    return { total, presente, falta, faltaJustificada, atestado, faltaProfissional, atestadoProfissional, cancelado, diaNaoFuncionou }
   }, [sessoesOnly])
 
   const itensPorHorario = useMemo(() => {
@@ -1036,7 +1101,7 @@ export function RecepcaoView({
         ) : modo === 'horario' ? (
           <>
             {/* Stats */}
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-7 gap-2">
               <div className="bg-white rounded-lg border p-2 text-center">
                 <div className="text-xl font-bold text-gray-900">{stats.total}</div>
                 <div className="text-[10px] text-gray-500">TOTAL</div>
@@ -1049,6 +1114,14 @@ export function RecepcaoView({
                 <div className="text-xl font-bold text-red-700">{stats.falta + stats.faltaJustificada + stats.atestado}</div>
                 <div className="text-[10px] text-red-600">FALTAS</div>
               </div>
+              <div className="bg-pink-50 rounded-lg border border-pink-200 p-2 text-center">
+                <div className="text-xl font-bold text-pink-700">{stats.faltaProfissional}</div>
+                <div className="text-[10px] text-pink-600">FALTA PROF.</div>
+              </div>
+              <div className="bg-indigo-50 rounded-lg border border-indigo-200 p-2 text-center">
+                <div className="text-xl font-bold text-indigo-700">{stats.atestadoProfissional}</div>
+                <div className="text-[10px] text-indigo-600">ATEST. PROF.</div>
+              </div>
               <div className="bg-gray-50 rounded-lg border border-gray-200 p-2 text-center">
                 <div className="text-xl font-bold text-gray-500">{stats.cancelado}</div>
                 <div className="text-[10px] text-gray-500">CANCELADOS</div>
@@ -1059,7 +1132,7 @@ export function RecepcaoView({
               </div>
             </div>
 
-            <TabelaSessoes sessoes={itensPorHorario} terapeutasHoje={terapeutasHoje} onMudarStatus={handleMudarStatusLocal} onMudarStatusTerapeuta={onMudarStatusTerapeuta} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
+            <TabelaSessoes sessoes={itensPorHorario} terapeutasHoje={terapeutasHoje} onMudarStatus={handleMudarStatusLocal} onMudarStatusTerapeuta={handleMudarStatusTerapeutaLocal} onMarcarAusenciaProfissional={onMarcarAusenciaProfissional} onEditarPaciente={onEditarPaciente} />
           </>
         ) : (
           <>
@@ -1077,7 +1150,7 @@ export function RecepcaoView({
                     <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {terapeutasDoGrupo.map((t, idx) => {
-                          const stCfg = STATUS_TERAPETA_CONFIG[t.status || 'AGENDADO']
+                          const stCfg = STATUS_TERAPEUTA_CONFIG[t.status || 'AGENDADO']
                           const inativo = t.ativo === false
                           const temExcecao = t.status && t.status !== 'AGENDADO' && t.status !== 'PRESENTE'
                           const motivo = extrairMotivoAusencia(t.observacoes)
@@ -1105,7 +1178,14 @@ export function RecepcaoView({
                               <MenuTerapeutaStatus
                                 sessaoId={lista.find(s => s.tipo !== 'VAZIO')?.id || lista[0]?.id || ''}
                                 terapeuta={t}
-                                onMudarStatus={onMudarStatusTerapeuta}
+                                onMudarStatus={(_sessaoId, terapeutaId, status) => {
+                                  // Na view por terapeuta, aplica o status a TODAS as sessoes do grupo
+                                  lista.forEach(s => {
+                                    if (s.tipo !== 'VAZIO' && s.terapeutas?.some((tt: any) => tt.id === terapeutaId)) {
+                                      handleMudarStatusTerapeutaLocal(s.id, terapeutaId, status)
+                                    }
+                                  })
+                                }}
                                 onMarcarAusencia={onMarcarAusenciaProfissionalDia ? (motivo) => {
                                   onMarcarAusenciaProfissionalDia(t.id, dataISO, motivo).catch(() => {})
                                 } : undefined}

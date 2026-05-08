@@ -29,15 +29,16 @@ function diaDaSemanaFormatado(dataISO: string): string {
 }
 
 const STATUS_OPCOES = [
-  'AGENDADO',
-  'PRESENTE',
-  'FALTA',
-  'FALTA_JUSTIFICADA',
-  'ATESTADO',
-  'ATESTADO_PROFISSIONAL',
-  'FALTA_PROFISSIONAL',
-  'CANCELADO',
-  'REPOSTO',
+  { value: 'AGENDADO', label: 'AGENDADO' },
+  { value: 'CONFIRMADO', label: 'CONFIRMADO' },
+  { value: 'PRESENTE', label: 'PRESENTE' },
+  { value: 'FALTA', label: 'FALTA' },
+  { value: 'FALTA_JUSTIFICADA', label: 'FALTA JUSTIFICADA' },
+  { value: 'ATESTADO', label: 'ATESTADO' },
+  { value: 'ATESTADO_PROFISSIONAL', label: 'ATESTADO DO PROFISSIONAL' },
+  { value: 'FALTA_PROFISSIONAL', label: 'FALTA DO PROFISSIONAL' },
+  { value: 'CANCELADO', label: 'CANCELADO' },
+  { value: 'REPOSTO', label: 'REPOSTO' },
 ]
 
 const TIPO_OPCOES = [
@@ -221,7 +222,7 @@ export function SessaoForm({ sessao, pacientes, terapeutas, horarios, defaultDat
             className={`${inputClass()} bg-white`}
           >
             {STATUS_OPCOES.map(s => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </select>
         </div>

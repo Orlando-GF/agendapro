@@ -7,7 +7,7 @@ export const SessaoSchema = z.object({
   hora_inicio: z.string().regex(/^\d{2}:\d{2}$/, 'Hora deve estar no formato HH:MM'),
   hora_fim: z.string().regex(/^\d{2}:\d{2}$/, 'Hora deve estar no formato HH:MM'),
   status: z.enum([
-    'AGENDADO', 'PRESENTE', 'FALTA', 'FALTA_JUSTIFICADA',
+    'AGENDADO', 'CONFIRMADO', 'PRESENTE', 'FALTA', 'FALTA_JUSTIFICADA',
     'ATESTADO', 'ATESTADO_PROFISSIONAL', 'FALTA_PROFISSIONAL',
     'CANCELADO', 'REPOSTO'
   ]),

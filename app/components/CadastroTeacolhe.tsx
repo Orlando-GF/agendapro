@@ -11,8 +11,11 @@ import {
   listarBloqueios, criarBloqueio, excluirBloqueio,
   listarAusencias, salvarAusencia, excluirAusencia,
   listarHistoricoPaciente, listarHistoricoTerapeuta, listarEstatisticasGerais,
+  listarGrupos, salvarGrupo, excluirGrupo, listarParticipantesGrupo, salvarParticipanteGrupo, excluirParticipanteGrupo,
+  listarPlantoes, salvarPlantao, excluirPlantao,
   Patient, PatientFormData, Terapeuta, TerapeutaFormData, Especialidade, Horario, HorarioFormData,
   Sessao, SessaoFormData, Bloqueio, Ausencia, AusenciaFormData,
+  Grupo, GrupoParticipante, Plantao,
 } from '../actions'
 import { Sidebar } from './Sidebar'
 import { StatsCards } from './StatsCards'
@@ -29,6 +32,12 @@ import { SessoesView } from './SessoesView'
 import { SessaoForm } from './SessaoForm'
 import { RelatoriosView } from './RelatoriosView'
 import { RecepcaoView } from './RecepcaoView'
+import { GruposView } from './GruposView'
+import { GrupoForm } from './GrupoForm'
+import { PlantoesView } from './PlantoesView'
+import { PlantaoForm } from './PlantaoForm'
+import { GrupoPresencaModal } from './GrupoPresencaModal'
+import { PlantaoPresencaModal } from './PlantaoPresencaModal'
 import { ToastProvider } from './ToastProvider'
 import { ToastContainer } from './ToastContainer'
 import { useToast } from '../hooks/useToast'
@@ -38,8 +47,8 @@ import { useCrudList } from '../hooks/useCrudList'
 import { useAgenda } from '../hooks/useAgenda'
 import { useRecepcao } from '../hooks/useRecepcao'
 
-type View = 'agenda' | 'recepcao' | 'pacientes' | 'terapeutas' | 'especialidades' | 'horarios' | 'relatorios'
-type FormType = 'paciente' | 'terapeuta' | 'especialidade' | 'horario' | 'sessao' | null
+type View = 'agenda' | 'recepcao' | 'pacientes' | 'terapeutas' | 'especialidades' | 'horarios' | 'grupos' | 'plantoes' | 'relatorios'
+type FormType = 'paciente' | 'terapeuta' | 'especialidade' | 'horario' | 'sessao' | 'grupo' | 'plantao' | null
 
 interface InitialData {
   initialPacientes: Patient[]
@@ -138,6 +147,19 @@ function CadastroTeacolheInner({
   const [dataRecepcao, setDataRecepcao] = useState<Date>(new Date())
   const { sessoes: sessoesHoje, ausencias: ausenciasRecepcao, bloqueios: bloqueiosRecepcao, loading: loadingRecepcao, recarregar: recarregarRecepcao } = useRecepcao(dataRecepcao, view, toastError)
 
+  // Grupos
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  const [loadingGrupos, setLoadingGrupos] = useState(false)
+  const [grupoEdicao, setGrupoEdicao] = useState<Grupo | null>(null)
+  const [grupoParticipantes, setGrupoParticipantes] = useState<GrupoParticipante[]>([])
+  const [grupoPresencaModal, setGrupoPresencaModal] = useState<Grupo | null>(null)
+
+  // Plantões
+  const [plantoes, setPlantoes] = useState<Plantao[]>([])
+  const [loadingPlantoes, setLoadingPlantoes] = useState(false)
+  const [plantaoEdicao, setPlantaoEdicao] = useState<Plantao | null>(null)
+  const [plantaoPresencaModal, setPlantaoPresencaModal] = useState<Plantao | null>(null)
+
   // Loading global para ações (salvar/excluir)
   const [submitting, setSubmitting] = useState(false)
 
@@ -149,6 +171,11 @@ function CadastroTeacolheInner({
     cancelar: boolean
   }>({ aberto: false, dados: null, qtdSessoes: 0, cancelar: false })
 
+  useEffect(() => {
+    if (view === 'grupos') carregarGrupos()
+    if (view === 'plantoes') carregarPlantoes()
+  }, [view])
+
   const abrirForm = (tipo: FormType, item?: any) => {
     setFormType(tipo)
     if (tipo === 'paciente') setPacienteEdicao(item || null)
@@ -159,6 +186,15 @@ function CadastroTeacolheInner({
       setSessaoEdicao(item || null)
       setSessaoFormDefaults({})
     }
+    if (tipo === 'grupo') {
+      setGrupoEdicao(item || null)
+      if (item?.id) {
+        listarParticipantesGrupo(item.id).then(setGrupoParticipantes).catch(() => setGrupoParticipantes([]))
+      } else {
+        setGrupoParticipantes([])
+      }
+    }
+    if (tipo === 'plantao') setPlantaoEdicao(item || null)
     setSidepanelAberto(true)
   }
 
@@ -178,6 +214,9 @@ function CadastroTeacolheInner({
     setHorarioEdicao(null)
     setSessaoEdicao(null)
     setSessaoFormDefaults({})
+    setGrupoEdicao(null)
+    setGrupoParticipantes([])
+    setPlantaoEdicao(null)
   }
 
   const recarregarView = async () => {
@@ -187,8 +226,34 @@ function CadastroTeacolheInner({
     if (view === 'horarios') await recarregarHorarios()
     if (view === 'agenda') await recarregarAgenda()
     if (view === 'recepcao') await recarregarRecepcao()
+    if (view === 'grupos') await carregarGrupos()
+    if (view === 'plantoes') await carregarPlantoes()
     const a = await listarAusencias()
     setAusencias(a)
+  }
+
+  const carregarGrupos = async () => {
+    setLoadingGrupos(true)
+    try {
+      const g = await listarGrupos()
+      setGrupos(g)
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setLoadingGrupos(false)
+    }
+  }
+
+  const carregarPlantoes = async () => {
+    setLoadingPlantoes(true)
+    try {
+      const p = await listarPlantoes()
+      setPlantoes(p)
+    } catch (err: any) {
+      toastError(err.message)
+    } finally {
+      setLoadingPlantoes(false)
+    }
   }
 
   const handleSalvarPaciente = async (dados: PatientFormData, deveCancelarSessoes?: boolean) => {
@@ -327,7 +392,6 @@ function CadastroTeacolheInner({
       success('Ausência do profissional registrada')
       const dataISO = formatDateISO(dataRecepcao)
       queryClient.invalidateQueries({ queryKey: ['recepcao', 'sessoes', dataISO] })
-      queryClient.invalidateQueries({ queryKey: ['recepcao', 'ausencias', dataISO] })
       queryClient.invalidateQueries({ queryKey: ['agenda'] })
       queryClient.invalidateQueries({ queryKey: ['relatorios'] })
     } catch (err: any) {
@@ -394,6 +458,8 @@ function CadastroTeacolheInner({
       if (tipo === 'especialidade') await excluirEspecialidade(id)
       if (tipo === 'horario') await excluirHorario(id)
       if (tipo === 'sessao') await excluirSessao(id)
+      if (tipo === 'grupo') await excluirGrupo(id)
+      if (tipo === 'plantao') await excluirPlantao(id)
       success('Excluído com sucesso')
       await recarregarView()
     } catch (err: any) {
@@ -410,6 +476,8 @@ function CadastroTeacolheInner({
     terapeutas: 'Terapeutas',
     especialidades: 'Especialidades',
     horarios: 'Horários',
+    grupos: 'Grupos',
+    plantoes: 'Plantões',
     relatorios: 'Relatórios',
   }
 
@@ -420,6 +488,8 @@ function CadastroTeacolheInner({
     terapeutas: 'Novo Terapeuta',
     especialidades: 'Nova Especialidade',
     horarios: 'Novo Horário',
+    grupos: 'Novo Grupo',
+    plantoes: 'Novo Plantão',
     relatorios: 'Relatórios',
   }
 
@@ -468,6 +538,8 @@ function CadastroTeacolheInner({
               <button
                 onClick={() => {
                   if (view === 'agenda' || view === 'recepcao') abrirSessaoForm()
+                  else if (view === 'grupos') abrirForm('grupo')
+                  else if (view === 'plantoes') abrirForm('plantao')
                   else abrirForm(view === 'pacientes' ? 'paciente' : view === 'terapeutas' ? 'terapeuta' : view === 'especialidades' ? 'especialidade' : 'horario')
                 }}
                 disabled={submitting}
@@ -497,6 +569,7 @@ function CadastroTeacolheInner({
                   onMudarSemana={setSemanaAtual}
                   onNovaSessao={(data, horaInicio, horaFim) => abrirSessaoForm({ data, hora_inicio: horaInicio, hora_fim: horaFim })}
                   onEditarSessao={s => { setSessaoEdicao(s); setSessaoFormDefaults({}); setFormType('sessao'); setSidepanelAberto(true) }}
+                  onExcluirSessao={id => handleExcluir('sessao', id)}
                   onBloquear={async (data, horaInicio, horaFim) => {
                     if (!terapeutaFiltro) return
                     try {
@@ -604,6 +677,33 @@ function CadastroTeacolheInner({
             </>
           )}
 
+          {view === 'grupos' && (
+            <>
+              {loadingGrupos && <span className="text-sm text-gray-500 mb-2 block">Carregando...</span>}
+              <GruposView
+                grupos={grupos}
+                terapeutas={terapeutas}
+                loading={loadingGrupos}
+                onEditar={g => abrirForm('grupo', g)}
+                onExcluir={id => handleExcluir('grupo', id)}
+                onPresenca={g => setGrupoPresencaModal(g)}
+              />
+            </>
+          )}
+
+          {view === 'plantoes' && (
+            <>
+              {loadingPlantoes && <span className="text-sm text-gray-500 mb-2 block">Carregando...</span>}
+              <PlantoesView
+                plantoes={plantoes}
+                loading={loadingPlantoes}
+                onEditar={p => abrirForm('plantao', p)}
+                onExcluir={id => handleExcluir('plantao', id)}
+                onPresenca={p => setPlantaoPresencaModal(p)}
+              />
+            </>
+          )}
+
           {view === 'relatorios' && (
             <RelatoriosView
               pacientes={pacientes}
@@ -641,6 +741,82 @@ function CadastroTeacolheInner({
           defaultHoraFim={sessaoFormDefaults.hora_fim}
           onSalvar={handleSalvarSessao}
           onCancelar={fecharForm}
+        />
+      )}
+      {sidepanelAberto && formType === 'grupo' && (
+        <GrupoForm
+          key={grupoEdicao?.id || 'novo'}
+          grupo={grupoEdicao}
+          terapeutas={terapeutas}
+          participantes={grupoParticipantes}
+          onSalvar={async (dados) => {
+            setSubmitting(true)
+            try {
+              await salvarGrupo(dados)
+              fecharForm()
+              await recarregarView()
+            } catch (err: any) {
+              toastError(err.message)
+            } finally {
+              setSubmitting(false)
+            }
+          }}
+          onSalvarParticipante={async (dados) => {
+            try {
+              await salvarParticipanteGrupo(dados)
+              if (grupoEdicao?.id) {
+                const p = await listarParticipantesGrupo(grupoEdicao.id)
+                setGrupoParticipantes(p)
+              }
+            } catch (err: any) {
+              toastError(err.message)
+            }
+          }}
+          onExcluirParticipante={async (id) => {
+            try {
+              await excluirParticipanteGrupo(id)
+              if (grupoEdicao?.id) {
+                const p = await listarParticipantesGrupo(grupoEdicao.id)
+                setGrupoParticipantes(p)
+              }
+            } catch (err: any) {
+              toastError(err.message)
+            }
+          }}
+          onCancelar={fecharForm}
+        />
+      )}
+      {sidepanelAberto && formType === 'plantao' && (
+        <PlantaoForm
+          key={plantaoEdicao?.id || 'novo'}
+          plantao={plantaoEdicao}
+          terapeutas={terapeutas}
+          onSalvar={async (dados) => {
+            setSubmitting(true)
+            try {
+              await salvarPlantao(dados)
+              fecharForm()
+              await recarregarView()
+            } catch (err: any) {
+              toastError(err.message)
+            } finally {
+              setSubmitting(false)
+            }
+          }}
+          onCancelar={fecharForm}
+        />
+      )}
+
+      {grupoPresencaModal && (
+        <GrupoPresencaModal
+          grupo={grupoPresencaModal}
+          onFechar={() => setGrupoPresencaModal(null)}
+        />
+      )}
+      {plantaoPresencaModal && (
+        <PlantaoPresencaModal
+          plantao={plantaoPresencaModal}
+          onFechar={() => setPlantaoPresencaModal(null)}
         />
       )}
 
